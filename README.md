@@ -18,6 +18,14 @@
 - 升级位：PaddleOCR.js（官方 PP-OCRv5 浏览器 SDK）待核实 API 后前置接入 `loadOcrEngine()`；
 - **待真机验证**：Tesseract.js 中文面单命中率、`chi_sim` 模型下载在国内网络的可达性。
 
+## 扩展功能：YOLO 检测（管线已通，权重待微调）
+
+选图后点「🔍 YOLO 检测」：**预训练 YOLOv8n（COCO 80 类）** 在浏览器里跑 onnxruntime-web（WebGPU → WASM 兜底）推理，检测框叠加在图上、结果并入 JSON（`yolo.detections`）。模型 `models/yolov8n.onnx`（约 13MB）随仓库同源托管在 GitHub Pages。
+
+**保证 fallback**：ort 引擎 / 模型 / 推理任一失败 → 跳过并提示，不影响扫码与 OCR。
+
+**现状与下一步**：COCO 预训练权重对面单无实际类别——它是**管线验证**；真正价值是**微调"单号区域"检测器**（用你的面单照片标注单号框，几十张即可，CPU 微调可行）→ 导出 ONNX 替换 `models/yolov8n.onnx`（文件名不变、代码零改动）→ 检测到单号区域后裁剪放大再走扫码/OCR，提升"角度不定、面单占比小"场景的命中率。**待真机验证**：WebGPU 可用性、WASM 推理时延、模型同源加载。
+
 ## 在线访问（GitHub Pages）
 
 <https://Hana-ame.github.io/express-scan/> —— 手机浏览器直接打开即用（HTTPS，实时扫码可用）；代码在浏览器本地运行，**照片不出设备**。
