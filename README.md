@@ -1,6 +1,22 @@
-# express-scan · 快递单号扫码识别（M0 纯前端）
+# express-scan · 快递单号扫码识别（M0 纯前端 + OCR 兜底扩展）
 
-单文件网页：浏览器打开即用，拍照/选图上传 → 原生 BarcodeDetector 扫码（ZXing-js CDN 兜底）→ 单号正则判定 → 页面展示可复制 JSON（`barcodes.{1d,2d}` + `tracking_number`）。零安装、零后端、零训练、零 GPU。
+单文件网页：浏览器打开即用，拍照/选图上传 → 原生 BarcodeDetector 扫码（ZXing-js CDN 兜底）→ 单号正则判定 → 页面展示可复制 JSON（`barcodes.{1d,2d}` + `ocr` + `tracking_number`）。零安装、零后端、零训练、零 GPU。
+
+## 扩展功能：OCR 兜底（M1）
+
+条码**未出有效单号**时，自动尝试纯前端 OCR（Tesseract.js，`chi_sim` 中文模型）从面单文字里提取单号，结果填入 JSON 的 `ocr` 字段（`full_text` / `lines` / `tracking_number.method='ocr'`）。
+
+**保证 fallback（核心原则）**：
+- OCR 只在条码失败时触发，条码命中绝不跑 OCR；
+- 引擎脚本、模型、CDN 任一加载失败 → **静默跳过**，条码结果与页面完全不受影响（`ocr` 返回 `null`）；
+- 可手动关闭（页面「🔤 OCR 兜底：开/关」按钮），关闭后不触发；
+- OCR 识别未命中单号 → `status=partial/failed`，只展示文字不报假号。
+
+**注意**：
+- 首次 OCR 需联网下载引擎与中文模型（约 15MB+，之后浏览器缓存）；
+- OCR 仅作用于**拍照/选图**路径，实时扫码不做（实时帧太重）；
+- 升级位：PaddleOCR.js（官方 PP-OCRv5 浏览器 SDK）待核实 API 后前置接入 `loadOcrEngine()`；
+- **待真机验证**：Tesseract.js 中文面单命中率、`chi_sim` 模型下载在国内网络的可达性。
 
 ## 在线访问（GitHub Pages）
 
@@ -35,7 +51,7 @@ Firefox 不支持 BarcodeDetector → 自动走 ZXing CDN；CDN 也失败则页�
 
 - 免训练、不装东西（运行时只依赖浏览器 + 兜底时的 CDN）、不用 YOLO、无 GPU。
 - 单号规则（`index.html` 内 `RULES`）为**示意**，随快递公司版本变化，以官方为准；核心纪律：**宁可报"未识别"，不出假号**。
-- OCR 兜底（无条码/破损照片）属 M1，本期未启用，JSON 中 `ocr.*` 留空。
+- OCR 兜底已启用（见上文扩展功能）；其加载失败/离线时自动跳过，`ocr` 为 `null`。
 - 二维码内容可能是平台密文，`barcodes.2d[].data` 原样展示、不强行解析。
 
 ## 项目笔记
