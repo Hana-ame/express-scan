@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>快递单号扫码识别 · M0 纯前端</title>
+<style>
+  :root { --bg:#0f1115; --card:#1a1e26; --fg:#e6e8ec; --dim:#8b93a3; --acc:#4f8cff; --ok:#3ecf8e; --warn:#ffb454; --bad:#ff6b6b; }
+  * { box-sizing:border-box; }
+  body { margin:0; padding:16px; background:var(--bg); color:var(--fg);
+         font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif; max-width:640px; margin-inline:auto; }
+  h1 { font-size:18px; margin:4px 0 12px; }
+  h1 small { color:var(--dim); font-weight:normal; margin-left:8px; font-size:12px; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
+  button, .btn { background:var(--acc); color:#fff; border:0; border-radius:10px;
+                 padding:12px 16px; font-size:15px; cursor:pointer; flex:1; min-width:120px; }
+  .btn { display:inline-block; text-align:center; }
+  label.btn input { display:none; }
+  #btnStop { background:var(--bad); }
+  #videoWrap { position:relative; border-radius:12px; overflow:hidden; background:#000; margin-bottom:12px; }
+  video { width:100%; display:block; }
+  #engine { color:var(--dim); font-size:12px; margin-bottom:12px; }
+  #status { color:var(--dim); font-size:13px; min-height:18px; margin-bottom:8px; white-space:pre-wrap; }
+  #card { background:var(--card); border-radius:12px; padding:14px; }
+  #tracking { font-size:22px; font-weight:bold; word-break:break-all; margin-bottom:8px; }
+  #tracking.ok { color:var(--ok); } #tracking.partial { color:var(--warn); } #tracking.failed { color:var(--bad); }
+  #meta { color:var(--dim); font-size:12px; margin-bottom:10px; }
+  pre { background:#0a0c10; border-radius:8px; padding:10px; overflow:auto; font-size:11px;
+        max-height:300px; margin:0 0 10px; color:#c9d1d9; white-space:pre-wrap; word-break:break-all; }
+  #btnCopy { background:var(--ok); color:#052e1c; }
+  #toast { position:fixed; left:50%; bottom:40px; transform:translateX(-50%);
+           background:#2a2f3a; padding:8px 16px; border-radius:20px; font-size:13px;
+           opacity:0; transition:opacity .2s; pointer-events:none; }
+  #toast.show { opacity:1; }
+</style>
+</head>
+<body>
+
+<h1>📦 快递单号扫码识别 <small>M0 纯前端 · 零安装</small></h1>
+
+<div class="row">
+  <button id="btnCamera">📷 实时扫码</button>
+  <label class="btn">🖼 拍照 / 选图
+    <input id="fileInput" type="file" accept="image/*" capture="environment">
+  </label>
+</div>
+<button id="btnStop" hidden>⏹ 停止</button>
+
+<div id="videoWrap" hidden>
+  <video id="video" playsinline muted></video>
+  <canvas id="frame" hidden></canvas>
+</div>
+
+<div id="engine"></div>
+<div id="status">准备就绪：拍照上传在任何浏览器可用；实时扫码需 HTTPS 或 localhost。</div>
+
+<div id="card">
+  <div id="tracking">—</div>
+  <div id="meta"></div>
+  <pre id="jsonOut">（扫码后在这里显示 JSON）</pre>
+  <button id="btnCopy" hidden>复制 JSON</button>
+</div>
+
+<div id="toast"></div>
+
+<script>
+'use strict';
+/* =====================================================================
+ * M0 纯前端快递单号识别：BarcodeDetector（原生）+ ZXing-js（CDN 兜底）
+ * 输出 JSON 与方案笔记 schema 一致：barcodes.{1d,2d} + tracking_number
+ * 单号规则为示意，随快递公司版本变化，以官方为准。
+ * ===================================================================== */
+
+// ---------- 单号规则（示意） ----------
+const RULES = [
+  { company:'sf',    name:'顺丰',    re:/^SF\d{12}$/i },
+  { company:'ems',   name:'EMS/邮政', re:/^[A-Z]{2}\d{9}CN$/i },
+  { company:'yto',   name:'圆通',    re:/^(YT\d{13}|\d{13})$/i },
+  { company:'zto',   name:'中通',    re:/^\d{12,14}$/ },
+  { company:'yunda', name:'韵达',    re:/^\d{13}$/ },
+  { company:'sto',   name:'申通',    re:/^\d{12,15}$/ },
+  { company:'jd',    name:'京东',    re:/^(JD\d{12,13}|\d{13})$/i },
+  { company:'dbl',   name:'德邦',    re:/^(DBL|DPK)\d{10,12}$/i },
+];
+function matchRule(s) {
+  s = String(s || '').replace(/\s+/g, '').toUpperCase();
+  for (const r of RULES) if (r.re.test(s)) return r;
+  return null;
+}
+
+// ---------- 格式分类 ----------
+const FMT_1D = new Set(['code_128','code_39','code_93','codabar','ean_13','ean_8','upc_a','upc_e','itf']);
+const FMT_2D = new Set(['qr_code','data_matrix','aztec','pdf417']);
+function classify(fmt) { return FMT_2D.has(fmt) ? '2d' : '1d'; }
+
+// ---------- 引擎初始化：原生 BarcodeDetector → ZXing CDN 兜底 ----------
+let engine = null;              // {kind:'native', detector} | {kind:'zxing', reader}
+const ZXING_URLS = [
+  'https://unpkg.com/@zxing/browser@0.1.5/dist/browser.min.js',
+  'https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.5/dist/browser.min.js',
+];
+function loadScript(url) {
+  return new Promise((res, rej) => {
+    const s = document.createElement('script');
+    s.src = url; s.onload = () => res(); s.onerror = () => rej(new Error('加载失败 ' + url));
+    document.head.appendChild(s);
+  });
+}
+async function initEngine() {
+  if ('BarcodeDetector' in window) {
+    const full = ['code_128','code_39','code_93','codabar','ean_13','ean_8','itf','upc_a','upc_e','qr_code','data_matrix','aztec','pdf417'];
+    const min  = ['code_128','code_39','ean_13','ean_8','qr_code'];
+    for (const fmts of [full, min]) {
+      try { engine = { kind:'native', detector: new BarcodeDetector({ formats: fmts }) }; return; } catch (e) { /* 换最小集重试 */ }
+    }
+  }
+  for (const url of ZXING_URLS) {
+    try { await loadScript(url); if (window.ZXing && window.ZXing.BrowserMultiFormatReader) {
+      engine = { kind:'zxing', reader: new window.ZXing.BrowserMultiFormatReader() }; return; } } catch (e) { /* 换下一个源 */ }
+  }
+  throw new Error('当前浏览器无 BarcodeDetector 且 ZXing CDN 加载失败，请换 Chrome/Safari 新版');
+}
+
+// ---------- 结果归一化 ----------
+function zxingFmtName(f) {
+  try {
+    const B = window.ZXing && window.ZXing.BarcodeFormat;
+    if (B) for (const k in B) if (B[k] === f) return String(k).toLowerCase();
+    if (f && f.name) return String(f.name).toLowerCase();
+  } catch (e) {}
+  return 'unknown';
+}
+function zxingPoints(r) {
+  const pts = r.getResultPoints && r.getResultPoints();
+  if (!pts) return [];
+  return pts.filter(Boolean).map(p => [Math.round(p.getX()), Math.round(p.getY())]);
+}
+function nativeItems(dets) {
+  return dets.filter(d => d.rawValue).map(d => ({
+    format: String(d.format || '').toLowerCase(),
+    data: d.rawValue,
+    points: (d.cornerPoints || []).map(p => [Math.round(p.x), Math.round(p.y)]),
+  }));
+}
+function buildJson(items, srcName, t0) {
+  const b1 = [], b2 = [];
+  for (const it of items) {
+    const bucket = classify(it.format) === '2d' ? b2 : b1;
+    bucket.push({ format: (it.format || 'unknown').toUpperCase(), data: it.data, points: it.points || [], confidence: 0.99 });
+  }
+  let tn = null;
+  for (const it of items) {
+    const r = matchRule(it.data);
+    if (r) {
+      tn = { value: it.data.replace(/\s+/g, '').toUpperCase(), company: r.company, company_name: r.name,
+             method: classify(it.format) === '2d' ? 'barcode_2d' : 'barcode_1d',
+             confidence: 1.0, status: 'ok' };
+      break;
+    }
+  }
+  return {
+    request_id: (crypto.randomUUID ? crypto.randomUUID() : 'r' + Math.random().toString(36).slice(2)),
+    status: tn ? 'ok' : (items.length ? 'partial' : 'failed'),
+    latency_ms: Math.round(performance.now() - t0),
+    source: srcName,
+    barcodes: { '1d': b1, '2d': b2 },
+    ocr: { full_text: null, lines: [], tracking_number: tn },   // OCR 兜底属 M1，本期留空
+  };
+}
+function render(json) {
+  const el = document.getElementById('tracking'), meta = document.getElementById('meta');
+  const tn = json.ocr.tracking_number;
+  el.className = json.status;
+  if (tn) { el.textContent = '【' + tn.value + '】 ' + (tn.company_name || ''); }
+  else if (json.status === 'partial') { el.textContent = '扫到条码，但未识别为快递单号'; }
+  else { el.textContent = '未识别到条码 / 单号'; }
+  meta.textContent = 'status=' + json.status + ' · latency=' + json.latency_ms + 'ms · ' + json.source
+    + ' · 1d=' + json.barcodes['1d'].length + ' · 2d=' + json.barcodes['2d'].length;
+  document.getElementById('jsonOut').textContent = JSON.stringify(json, null, 2);
+  document.getElementById('btnCopy').hidden = false;
+  lastJson = json;
+}
+let lastJson = null;
+
+// ---------- 拍照/选图上传（任何环境可用） ----------
+async function onFile(file) {
+  const t0 = performance.now();
+  status('正在解码…');
+  let items = [];
+  try {
+    if (engine.kind === 'native') {
+      const bmp = await createImageBitmap(file);
+      items = nativeItems(await engine.detector.detect(bmp));
+      bmp.close();
+    } else {
+      const r = await engine.reader.decodeFromImageFile(file);
+      items = [{ format: zxingFmtName(r.getBarcodeFormat()), data: r.getText(), points: zxingPoints(r) }];
+    }
+  } catch (e) { items = []; }
+  render(buildJson(items, 'photo', t0));
+  status(items.length ? '解码完成' : '未检出条码：试试把单号条码拍正、光线均匀；或转路线 B 用后端引擎');
+}
+
+// ---------- 实时扫码 ----------
+const video = document.getElementById('video'), frame = document.getElementById('frame');
+const fctx = frame.getContext('2d');
+let stream = null, liveTimer = null, zxingControls = null;
+async function startLive() {
+  const wrap = document.getElementById('videoWrap');
+  wrap.hidden = false; document.getElementById('btnStop').hidden = false;
+  status('正在开启相机…（实时扫码需 HTTPS 或 localhost；file:// 可能被浏览器拒绝，可用拍照上传）');
+  try {
+    if (engine.kind === 'zxing') {
+      zxingControls = await engine.reader.decodeFromVideoDevice(undefined, video, res => {
+        if (res) { stopLive(); render(buildJson([{ format: zxingFmtName(res.getBarcodeFormat()), data: res.getText(), points: zxingPoints(res) }], 'live', performance.now())); }
+      });
+    } else {
+      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
+      video.srcObject = stream; await video.play();
+      liveTimer = setInterval(scanFrame, 250);
+    }
+  } catch (e) {
+    status('相机打不开：' + e.message + ' —— 请用"拍照/选图"上传');
+    stopLive();
+  }
+}
+async function scanFrame() {
+  if (!video.videoWidth) return;
+  const w = Math.min(video.videoWidth, 960);
+  const h = Math.round(video.videoHeight * w / video.videoWidth);
+  frame.width = w; frame.height = h;
+  fctx.drawImage(video, 0, 0, w, h);
+  let dets = [];
+  try { dets = await engine.detector.detect(frame); } catch (e) {}
+  const found = dets.filter(d => d.rawValue);
+  if (found.length) {
+    stopLive();
+    render(buildJson(nativeItems(found), 'live', performance.now()));
+  }
+}
+function stopLive() {
+  if (liveTimer) { clearInterval(liveTimer); liveTimer = null; }
+  if (zxingControls) { try { zxingControls.stop(); } catch (e) {} zxingControls = null; }
+  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+  video.srcObject = null;
+  document.getElementById('videoWrap').hidden = true;
+  document.getElementById('btnStop').hidden = true;
+}
+
+// ---------- UI 粘合 ----------
+const $ = id => document.getElementById(id);
+function status(msg) { $('status').textContent = msg; }
+function toast(msg) {
+  const t = $('toast'); t.textContent = msg; t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 1600);
+}
+async function copyJson() {
+  if (!lastJson) return;
+  try { await navigator.clipboard.writeText(JSON.stringify(lastJson, null, 2)); toast('已复制'); }
+  catch (e) { prompt('浏览器不允许自动复制，请手动复制：', JSON.stringify(lastJson, null, 2)); }
+}
+$('btnCamera').addEventListener('click', startLive);
+$('btnStop').addEventListener('click', stopLive);
+$('fileInput').addEventListener('change', e => { if (e.target.files && e.target.files[0]) onFile(e.target.files[0]); e.target.value = ''; });
+$('btnCopy').addEventListener('click', copyJson);
+
+window.addEventListener('DOMContentLoaded', async () => {
+  try {
+    await initEngine();
+    $('engine').textContent = '引擎：' + (engine.kind === 'native' ? '原生 BarcodeDetector（' + engine.detector.formats.length + ' 格式）' : 'ZXing-js（CDN 兜底）');
+  } catch (e) {
+    $('engine').textContent = '引擎初始化失败：' + e.message;
+    $('status').textContent = '无法扫码；请换新版 Chrome / Safari，或转路线 B（后端 API）';
+  }
+});
+</script>
+</body>
+</html>
