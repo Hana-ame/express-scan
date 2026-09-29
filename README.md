@@ -13,10 +13,26 @@
 - OCR 识别未命中单号 → `status=partial/failed`，只展示文字不报假号。
 
 **注意**：
-- 首次 OCR 需联网下载引擎与中文模型（约 15MB+，之后浏览器缓存）；
+- 首次 OCR 需联网加载引擎（jsdelivr，小）与**中文模型 `models/chi_sim.traineddata.gz`（20MB，同源托管**，之后浏览器缓存）；
 - OCR 仅作用于**拍照/选图**路径，实时扫码不做（实时帧太重）；
-- 升级位：PaddleOCR.js（官方 PP-OCRv5 浏览器 SDK）待核实 API 后前置接入 `loadOcrEngine()`；
-- **待真机验证**：Tesseract.js 中文面单命中率、`chi_sim` 模型下载在国内网络的可达性。
+- 升级位：PaddleOCR.js（官方浏览器 SDK）待核实 API 后前置接入 `loadOcrEngine()`；
+- **坑（已修）**：`chi_sim` 模型最初走 `cdn.jsdelivr.net/gh/naptha/tessdata@main/...`——**404**（该仓库默认分支是 `gh-pages`，且文件 20.16MB 超 jsdelivr 文件上限）→ 已改为同源 `./models/` 托管，此路必通；
+- **待真机验证**：Tesseract.js 中文面单命中率。
+
+## 基准：本地 OCR 有多慢（手机实测）
+
+页面「⏱ OCR 基准」按钮：用一张**合成面单样本**（1240×1754，白底黑字含 `SF123456789012`）跑 Tesseract.js `chi_sim`，输出三段时延（模型加载 / 首次识别 / 稳态识别）并入 JSON（`bench` 字段）。
+
+**本机参考数（2026-09-30 实测，无头 Chromium 151 · WASM · CPU，Ryzen 5 3600）**：
+
+| 项目 | 时延 |
+|---|---|
+| Tesseract.js 模型加载（20MB 同源） | **2.8s** |
+| 首次识别（含 WASM 预热） | **1.2s** |
+| 稳态识别 | **0.9s**（且样本单号识别命中 ✓） |
+| YOLOv8n 推理（ort-web WASM，640 输入） | **0.64s**（模型加载 1.7s） |
+
+**手机预期**：移动 SoC 的 WASM 通常比桌面 CPU 慢 **2–5×**，即稳态识别约 **2–4s**、首次（预热）约 **3–6s**、20MB 模型按网络加载 5–20s；WebGPU 可用时 YOLO 可显著提速，OCR（Tesseract 无 WebGPU 后端）不受益。**真实数字请在手机上点「⏱ OCR 基准」报数**——参考口径就是上面那张合成样本。
 
 ## 扩展功能：YOLO 检测（管线已通，权重待微调）
 

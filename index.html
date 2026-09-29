@@ -49,6 +49,7 @@
   </label>
   <button id="btnOcr">🔤 OCR 兜底：开</button>
   <button id="btnYolo">🔍 YOLO 检测</button>
+  <button id="btnBench">⏱ OCR 基准</button>
 </div>
 <button id="btnStop" hidden>⏹ 停止</button>
 
@@ -277,7 +278,7 @@ function stopLive() {
 let ocrWorker = null;
 let ocrEnabled = true;
 const OCR_LANG = 'chi_sim';
-const OCR_LANG_PATH = 'https://cdn.jsdelivr.net/gh/naptha/tessdata@main/4.0.0/';
+const OCR_LANG_PATH = './models/';   // chi_sim.traineddata.gz 同源托管；jsdelivr gh 分支是 gh-pages 且文件超其 20MB 上限，CDN 不可用
 async function loadOcrEngine() {
   if (ocrWorker) return true;
   if (typeof Tesseract === 'undefined') {
@@ -428,6 +429,36 @@ function drawYolo(blob, dets, imgW, imgH) {
   img.src = URL.createObjectURL(blob);
 }
 
+// ---------- OCR 基准（手机实测：合成面单样本 → chi_sim 计时） ----------
+function makeSampleBlob() {
+  const cv = document.createElement('canvas');
+  cv.width = 1240; cv.height = 1754;
+  const ctx = cv.getContext('2d');
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cv.width, cv.height);
+  ctx.fillStyle = '#000';
+  ctx.font = 'bold 90px sans-serif'; ctx.fillText('顺丰速运 SF EXPRESS', 60, 160);
+  ctx.font = 'bold 170px sans-serif'; ctx.fillText('SF123456789012', 60, 420);
+  ctx.font = '56px sans-serif';
+  ctx.fillText('收件人：张三 13800138000', 60, 600);
+  ctx.fillText('地址：浙江省杭州市西湖区文三路 1 号', 60, 700);
+  ctx.fillText('快递单号 SF123456789012', 60, 820);
+  for (let x = 0; x < 900; x += 6) ctx.fillRect(60 + x, 880, 3, 40);
+  return new Promise(r => cv.toBlob(b => r(b), 'image/png'));
+}
+async function benchOcr() {
+  status('基准：绘制样本图并加载 OCR 引擎…（首次含 20MB 中文模型下载）');
+  const blob = await makeSampleBlob();
+  const t0 = performance.now();
+  const w = await Tesseract.createWorker(OCR_LANG, 1, { langPath: OCR_LANG_PATH });
+  const loadMs = performance.now() - t0;
+  const t1 = performance.now(); const r1 = await w.recognize(blob); const warmMs = performance.now() - t1;
+  const t2 = performance.now(); const r2 = await w.recognize(blob); const steadyMs = performance.now() - t2;
+  await w.terminate();
+  return { sample: '合成面单 1240x1754', engine: 'tesseract.js@5 chi_sim', load_ms: Math.round(loadMs),
+           recognize_warm_ms: Math.round(warmMs), recognize_steady_ms: Math.round(steadyMs),
+           found_sf: /SF123456789012/.test((r2.data && r2.data.text) || '') };
+}
+
 // ---------- UI 粘合 ----------
 const $ = id => document.getElementById(id);
 function status(msg) { $('status').textContent = msg; }
@@ -460,6 +491,14 @@ $('btnYolo').addEventListener('click', async () => {
     render(lastJson);
     status('YOLO：检出 ' + yolo.detections.length + ' 个目标（' + yolo.ep + ' · ' + yolo.latency_ms + 'ms）——预训练 COCO 权重为管线验证，单号区域检测需微调后换权重');
   }
+});
+$('btnBench').addEventListener('click', async () => {
+  const bench = await benchOcr();
+  if (!bench) { status('基准失败'); return; }
+  if (!lastJson) lastJson = {};
+  lastJson.bench = bench;
+  render(lastJson);
+  status('基准完成：模型加载 ' + bench.load_ms + 'ms · 首次识别 ' + bench.recognize_warm_ms + 'ms · 稳态识别 ' + bench.recognize_steady_ms + 'ms · 识别到单号=' + bench.found_sf + ' —— 手机实测请在同一页面跑并报数');
 });
 
 window.addEventListener('DOMContentLoaded', async () => {
