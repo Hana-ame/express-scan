@@ -1,364 +1,1264 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" class="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>快递单号扫码识别 · M0 纯前端</title>
+<title>express-scan · 纯前端快递单号识别</title>
+<script src="https://cdn.tailwindcss.com/3.4.17"></script>
+<script>
+  tailwind.config = {
+    darkMode: 'class',
+    theme: {
+      extend: {
+        fontFamily: {
+          sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', '"PingFang SC"', '"Microsoft YaHei"', 'sans-serif'],
+          mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'Monaco', 'Consolas', 'monospace']
+        },
+        colors: {
+          surface: {
+            950: '#090d14',
+            900: '#0f141e',
+            800: '#161d2b',
+            700: '#1f293b',
+            600: '#2d3a52'
+          }
+        }
+      }
+    }
+  };
+</script>
 <style>
-  :root { --bg:#0f1115; --card:#1a1e26; --fg:#e6e8ec; --dim:#8b93a3; --acc:#4f8cff; --ok:#3ecf8e; --warn:#ffb454; --bad:#ff6b6b; }
-  * { box-sizing:border-box; }
-  body { margin:0; padding:16px; background:var(--bg); color:var(--fg);
-         font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif; max-width:640px; margin-inline:auto; }
-  h1 { font-size:18px; margin:4px 0 12px; }
-  h1 small { color:var(--dim); font-weight:normal; margin-left:8px; font-size:12px; }
-  .row { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
-  button, .btn { background:var(--acc); color:#fff; border:0; border-radius:10px;
-                 padding:12px 16px; font-size:15px; cursor:pointer; flex:1; min-width:120px; }
-  .btn { display:inline-block; text-align:center; }
-  label.btn input { display:none; }
-  #btnStop { background:var(--bad); }
-  #btnOcr { background:var(--dim); }
-  #btnOcr.off { opacity:.55; }
-  #btnYolo { background:var(--acc); }
-  #yoloCanvas { width:100%; border-radius:12px; margin-bottom:12px; background:#000; }
-  #videoWrap { position:relative; border-radius:12px; overflow:hidden; background:#000; margin-bottom:12px; }
-  video { width:100%; display:block; }
-  #engine { color:var(--dim); font-size:12px; margin-bottom:12px; }
-  #status { color:var(--dim); font-size:13px; min-height:18px; margin-bottom:8px; white-space:pre-wrap; }
-  #card { background:var(--card); border-radius:12px; padding:14px; }
-  #tracking { font-size:22px; font-weight:bold; word-break:break-all; margin-bottom:8px; }
-  #tracking.ok { color:var(--ok); } #tracking.partial { color:var(--warn); } #tracking.failed { color:var(--bad); }
-  #meta { color:var(--dim); font-size:12px; margin-bottom:10px; }
-  pre { background:#0a0c10; border-radius:8px; padding:10px; overflow:auto; font-size:11px;
-        max-height:300px; margin:0 0 10px; color:#c9d1d9; white-space:pre-wrap; word-break:break-all; }
-  #btnCopy { background:var(--ok); color:#052e1c; }
-  #toast { position:fixed; left:50%; bottom:40px; transform:translateX(-50%);
-           background:#2a2f3a; padding:8px 16px; border-radius:20px; font-size:13px;
-           opacity:0; transition:opacity .2s; pointer-events:none; }
-  #toast.show { opacity:1; }
+  * { box-sizing: border-box; }
+  body { background-color: #090d14; color: #e6ecf5; -webkit-font-smoothing: antialiased; }
+  .qr-reticle {
+    position: relative;
+    width: min(68%, 240px);
+    aspect-ratio: 1 / 1;
+    border: 1px solid rgba(56, 189, 248, 0.25);
+    border-radius: 12px;
+    background: linear-gradient(to bottom, rgba(56, 189, 248, 0.03), transparent);
+    overflow: hidden;
+  }
+  .qr-corner {
+    position: absolute;
+    width: 20px;
+    height: 20px;
+    border-color: #38bdf8;
+    border-style: solid;
+    pointer-events: none;
+  }
+  .qr-corner-tl { top: 0; left: 0; border-width: 3px 0 0 3px; border-top-left-radius: 10px; }
+  .qr-corner-tr { top: 0; right: 0; border-width: 3px 3px 0 0; border-top-right-radius: 10px; }
+  .qr-corner-bl { bottom: 0; left: 0; border-width: 0 0 3px 3px; border-bottom-left-radius: 10px; }
+  .qr-corner-br { bottom: 0; right: 0; border-width: 0 3px 3px 0; border-bottom-right-radius: 10px; }
+  .scan-line {
+    position: absolute;
+    left: 4%;
+    right: 4%;
+    height: 3px;
+    border-radius: 999px;
+    background: linear-gradient(90deg, transparent, #38bdf8 20%, #34d399 50%, #38bdf8 80%, transparent);
+    box-shadow: 0 0 14px 2px rgba(56, 189, 248, 0.85), 0 -10px 18px rgba(52, 211, 153, 0.28);
+    animation: scanMove 2s ease-in-out infinite;
+  }
+  @keyframes scanMove {
+    0% { top: 6%; opacity: 0.55; }
+    50% { top: 90%; opacity: 1; }
+    100% { top: 6%; opacity: 0.55; }
+  }
+  .drop-active {
+    border-color: #38bdf8 !important;
+    background-color: rgba(56, 189, 248, 0.08) !important;
+  }
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: #0f141e; }
+  ::-webkit-scrollbar-thumb { background: #2d3a52; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #425475; }
 </style>
 </head>
-<body>
+<body class="min-h-screen flex flex-col">
 
-<h1>📦 快递单号扫码识别 <small>M0 纯前端 · 零安装</small></h1>
+<!-- Top Navigation Bar -->
+<header class="sticky top-0 z-30 border-b border-surface-700/80 bg-surface-950/90 backdrop-blur">
+  <div class="max-w-6xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+    <div class="flex items-center gap-3 min-w-0">
+      <div class="w-9 h-9 rounded-xl bg-blue-500/15 border border-blue-400/30 flex items-center justify-center text-blue-400 shrink-0">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M3 7V5a2 2 0 012-2h2m10 0h2a2 2 0 012 2v2m0 10v2a2 2 0 01-2 2h-2M7 21H5a2 2 0 01-2-2v-2M7 12h10M8 8v8m4-8v8m4-8v8"/>
+        </svg>
+      </div>
+      <div class="min-w-0">
+        <div class="flex items-center gap-2 flex-wrap">
+          <h1 class="text-base font-semibold tracking-tight text-white truncate">express-scan</h1>
+          <span class="px-2 py-0.5 text-[11px] font-medium rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">纯前端运行</span>
+        </div>
+        <p id="engineBadge" class="text-xs text-slate-400 truncate mt-0.5">正在初始化前端扫码引擎…</p>
+      </div>
+    </div>
 
-<div class="row">
-  <button id="btnCamera">📷 实时扫码</button>
-  <label class="btn">🖼 拍照 / 选图
-    <input id="fileInput" type="file" accept="image/*" capture="environment">
-  </label>
-  <button id="btnOcr">🔤 OCR 兜底：开</button>
-  <button id="btnYolo">🔍 YOLO 检测</button>
-  <button id="btnBench">⏱ OCR 基准</button>
+    <div class="flex items-center gap-2 flex-wrap">
+      <button id="btnFallbackBadge" type="button"
+        class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-surface-600 bg-surface-800 hover:bg-surface-700 text-slate-300 transition">
+        <span id="fallbackDot" class="w-2 h-2 rounded-full bg-slate-500"></span>
+        <span id="fallbackBadgeText">Fallback：未配置（默认）</span>
+      </button>
+      <button id="btnOpenSettings" type="button"
+        class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-600 hover:bg-blue-500 text-white transition">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+          <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+        </svg>
+        API 配置
+      </button>
+    </div>
+  </div>
+</header>
+
+<!-- Main Content -->
+<main class="flex-1 max-w-6xl w-full mx-auto px-4 py-5 grid grid-cols-1 lg:grid-cols-12 gap-5">
+
+  <!-- Left Column: Capture, Preview & Controls -->
+  <section class="lg:col-span-6 flex flex-col gap-4">
+
+    <!-- Input Action Card -->
+    <div id="dropZone" class="rounded-2xl bg-surface-900 border border-surface-700/80 p-4 flex flex-col gap-3 transition">
+      <div class="grid grid-cols-2 gap-2.5">
+        <button id="btnCamera" type="button"
+          class="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium transition">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+          </svg>
+          实时扫码
+        </button>
+
+        <label class="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-surface-700 hover:bg-surface-600 text-white text-sm font-medium cursor-pointer transition">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+          </svg>
+          拍照 / 选图
+          <input id="fileInput" type="file" accept="image/*" class="hidden">
+        </label>
+      </div>
+
+      <!-- Frontend Pipeline Options -->
+      <div class="flex flex-wrap items-center gap-1.5 pt-1 border-t border-surface-800">
+        <button id="btnToggleEnhance" type="button"
+          class="px-2 py-1.5 rounded-lg text-xs font-medium bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 transition">图像增强：开</button>
+        <button id="btnToggleOcr" type="button"
+          class="px-2 py-1.5 rounded-lg text-xs font-medium bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 transition">前端 OCR：开</button>
+        <button id="btnYolo" type="button"
+          class="px-2 py-1.5 rounded-lg text-xs font-medium bg-surface-800 hover:bg-surface-700 text-slate-400 border border-surface-700 transition">YOLO + ROI：关</button>
+        <button id="btnToggleTestTools" type="button"
+          class="px-2 py-1.5 rounded-lg text-xs font-medium bg-surface-800 hover:bg-surface-700 text-slate-300 border border-surface-600 transition">测试工具 ▾</button>
+        <div class="flex items-center gap-1.5 ml-auto">
+          <button id="btnManualLlm" type="button"
+            class="px-2 py-1.5 rounded-lg text-xs font-medium bg-violet-500/15 hover:bg-violet-500/25 text-violet-300 border border-violet-500/30 transition disabled:opacity-40 disabled:cursor-not-allowed"
+            disabled>LLM 辅助</button>
+          <button id="btnManualFallback" type="button"
+            class="px-2 py-1.5 rounded-lg text-xs font-medium bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 transition disabled:opacity-40 disabled:cursor-not-allowed"
+            disabled>Fallback API</button>
+        </div>
+      </div>
+
+      <!-- Secondary Test Panel (Hidden by default) -->
+      <div id="testToolsPanel" class="hidden pt-2 border-t border-surface-800 grid grid-cols-3 gap-2">
+        <button id="btnSampleBarcode" type="button"
+          class="px-2.5 py-2 rounded-xl bg-surface-800 hover:bg-surface-700 border border-surface-600 text-slate-200 text-xs font-medium transition">
+          测试条码单
+        </button>
+        <button id="btnSampleTextOnly" type="button"
+          class="px-2.5 py-2 rounded-xl bg-surface-800 hover:bg-surface-700 border border-surface-600 text-slate-200 text-xs font-medium transition">
+          测试无条码单
+        </button>
+        <button id="btnBench" type="button"
+          class="px-2.5 py-2 rounded-xl bg-surface-800 hover:bg-surface-700 border border-surface-600 text-slate-200 text-xs font-medium transition">
+          OCR 基准
+        </button>
+      </div>
+    </div>
+
+    <!-- Live Camera Container -->
+    <div id="videoWrap" class="hidden rounded-2xl overflow-hidden bg-black border border-surface-700 relative">
+      <video id="video" playsinline muted class="w-full block max-h-[380px] object-cover"></video>
+      <div class="pointer-events-none absolute inset-0 flex items-center justify-center">
+        <div class="qr-reticle">
+          <div class="qr-corner qr-corner-tl"></div>
+          <div class="qr-corner qr-corner-tr"></div>
+          <div class="qr-corner qr-corner-bl"></div>
+          <div class="qr-corner qr-corner-br"></div>
+          <div class="scan-line"></div>
+        </div>
+      </div>
+      <div class="absolute bottom-3 left-3 right-3 flex items-center justify-between gap-2">
+        <div class="flex items-center gap-2">
+          <button id="btnSwitchCam" type="button"
+            class="px-3 py-1.5 rounded-lg bg-black/70 hover:bg-black/90 text-white text-xs font-medium border border-white/15 backdrop-blur">
+            切换镜头
+          </button>
+          <button id="btnCaptureFrame" type="button"
+            class="px-3 py-1.5 rounded-lg bg-blue-600/90 hover:bg-blue-500 text-white text-xs font-medium backdrop-blur">
+            抓拍识别
+          </button>
+        </div>
+        <button id="btnStop" type="button"
+          class="px-3 py-1.5 rounded-lg bg-rose-600/90 hover:bg-rose-500 text-white text-xs font-medium backdrop-blur">
+          停止扫码
+        </button>
+      </div>
+      <canvas id="frame" class="hidden"></canvas>
+    </div>
+
+    <!-- Image Preview & Detection Overlay Canvas -->
+    <div id="previewCard" class="hidden rounded-2xl bg-surface-900 border border-surface-700/80 overflow-hidden">
+      <div class="px-3.5 py-2 border-b border-surface-800 flex items-center justify-between text-xs text-slate-400">
+        <span id="previewMeta">图像预览与定位框</span>
+        <div class="flex items-center gap-3">
+          <span class="inline-flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-emerald-400"></span>条码</span>
+          <span class="inline-flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-rose-400"></span>YOLO</span>
+        </div>
+      </div>
+      <div class="p-2 bg-black/60 flex justify-center">
+        <canvas id="previewCanvas" class="max-w-full max-h-[360px] rounded-lg object-contain"></canvas>
+      </div>
+    </div>
+
+    <!-- Pipeline Stepper & Live Status -->
+    <div class="rounded-2xl bg-surface-900 border border-surface-700/80 p-4 flex flex-col gap-3">
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+        <div id="stepBarcode" class="rounded-xl p-2.5 bg-surface-950 border border-surface-800">
+          <div class="text-slate-400 text-[11px]">1. 条码解码</div>
+          <div class="step-val font-medium text-slate-300 mt-0.5">待机</div>
+        </div>
+        <div id="stepOcr" class="rounded-xl p-2.5 bg-surface-950 border border-surface-800">
+          <div class="text-slate-400 text-[11px]">2. 前端 OCR</div>
+          <div class="step-val font-medium text-slate-300 mt-0.5">待机</div>
+        </div>
+        <div id="stepLlm" class="rounded-xl p-2.5 bg-surface-950 border border-surface-800">
+          <div class="text-slate-400 text-[11px]">3. LLM 辅助</div>
+          <div class="step-val font-medium text-slate-500 mt-0.5">未配置</div>
+        </div>
+        <div id="stepFallback" class="rounded-xl p-2.5 bg-surface-950 border border-surface-800">
+          <div class="text-slate-400 text-[11px]">4. Fallback API</div>
+          <div class="step-val font-medium text-slate-500 mt-0.5">未配置</div>
+        </div>
+      </div>
+      <div id="statusBar" class="text-xs text-slate-300 bg-surface-950/80 rounded-xl px-3 py-2 border border-surface-800 min-h-[36px] flex items-center whitespace-pre-wrap">就绪</div>
+    </div>
+  </section>
+
+  <!-- Right Column: Recognition Output, JSON, History & Rules -->
+  <section class="lg:col-span-6 flex flex-col gap-4">
+
+    <!-- Primary Result Highlight Card -->
+    <div class="rounded-2xl bg-surface-900 border border-surface-700/80 p-4 flex flex-col gap-3">
+      <div class="flex items-start justify-between gap-3">
+        <div class="min-w-0 flex-1">
+          <div class="text-xs text-slate-400 mb-1 flex items-center gap-2 flex-wrap">
+            <span>识别结果</span>
+            <span id="resultCompanyBadge" class="hidden px-2 py-0.5 rounded-md text-[11px] font-medium bg-blue-500/20 text-blue-300 border border-blue-500/30"></span>
+            <span id="resultMethodBadge" class="hidden px-2 py-0.5 rounded-md text-[11px] font-medium bg-surface-800 text-slate-300 border border-surface-600"></span>
+          </div>
+          <div id="trackingDisplay" class="text-2xl sm:text-3xl font-bold font-mono tracking-tight text-slate-400 break-all">
+            —
+          </div>
+        </div>
+        <button id="btnCopyTracking" type="button"
+          class="hidden shrink-0 px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium transition">
+          复制单号
+        </button>
+      </div>
+
+      <div id="metaLine" class="text-xs text-slate-400 flex flex-wrap gap-x-3 gap-y-1"></div>
+
+      <div class="flex flex-wrap gap-2 pt-1 border-t border-surface-800">
+        <button id="btnCopyJson" type="button" disabled
+          class="px-3 py-1.5 rounded-lg bg-surface-800 hover:bg-surface-700 text-slate-200 text-xs font-medium border border-surface-600 transition disabled:opacity-40 disabled:cursor-not-allowed">
+          复制 JSON
+        </button>
+        <button id="btnDownloadJson" type="button" disabled
+          class="px-3 py-1.5 rounded-lg bg-surface-800 hover:bg-surface-700 text-slate-200 text-xs font-medium border border-surface-600 transition disabled:opacity-40 disabled:cursor-not-allowed">
+          下载 JSON
+        </button>
+        <button id="btnClearResult" type="button"
+          class="px-3 py-1.5 rounded-lg bg-surface-800 hover:bg-surface-700 text-slate-400 hover:text-slate-200 text-xs font-medium border border-surface-700 transition ml-auto">
+          清空当前
+        </button>
+      </div>
+    </div>
+
+    <!-- Tabbed Inspector Card -->
+    <div class="rounded-2xl bg-surface-900 border border-surface-700/80 flex flex-col flex-1 min-h-[360px] overflow-hidden">
+      <div class="flex border-b border-surface-800 bg-surface-950/60 px-2 pt-2 gap-1 overflow-x-auto">
+        <button type="button" data-tab="overview" class="tab-btn px-3 py-2 text-xs font-medium rounded-t-lg border-b-2 border-blue-500 text-blue-400 bg-surface-900">
+          结构化详情
+        </button>
+        <button type="button" data-tab="json" class="tab-btn px-3 py-2 text-xs font-medium rounded-t-lg border-b-2 border-transparent text-slate-400 hover:text-slate-200">
+          原始 JSON
+        </button>
+        <button type="button" data-tab="history" class="tab-btn px-3 py-2 text-xs font-medium rounded-t-lg border-b-2 border-transparent text-slate-400 hover:text-slate-200">
+          历史记录 (<span id="historyCount">0</span>)
+        </button>
+        <button type="button" data-tab="rules" class="tab-btn px-3 py-2 text-xs font-medium rounded-t-lg border-b-2 border-transparent text-slate-400 hover:text-slate-200">
+          单号规则
+        </button>
+      </div>
+
+      <!-- Tab: Overview -->
+      <div id="panel-overview" class="tab-panel p-4 flex flex-col gap-3 overflow-y-auto max-h-[460px]">
+        <div id="overviewEmpty" class="text-xs text-slate-500 py-8 text-center">暂无数据</div>
+        <div id="overviewContent" class="hidden flex flex-col gap-3">
+          <div>
+            <h3 class="text-xs font-semibold text-slate-300 mb-1.5">条码识别（1D / 2D）</h3>
+            <div id="barcodeList" class="flex flex-col gap-1.5 text-xs"></div>
+          </div>
+          <div>
+            <h3 class="text-xs font-semibold text-slate-300 mb-1.5">前端 OCR 提取文本</h3>
+            <div id="ocrLinesList" class="flex flex-col gap-1 text-xs"></div>
+          </div>
+          <div id="yoloSection" class="hidden">
+            <h3 class="text-xs font-semibold text-slate-300 mb-1.5">YOLO 检测目标</h3>
+            <div id="yoloList" class="flex flex-wrap gap-1.5 text-xs"></div>
+          </div>
+          <div id="llmSection" class="hidden">
+            <h3 class="text-xs font-semibold text-slate-300 mb-1.5">LLM 辅助解析（OpenAI 兼容）</h3>
+            <div id="llmDetail" class="rounded-xl bg-surface-950 border border-surface-800 p-2.5 text-xs text-slate-300 flex flex-col gap-1.5"></div>
+          </div>
+          <div id="fallbackSection" class="hidden">
+            <h3 class="text-xs font-semibold text-slate-300 mb-1.5">Fallback API 响应</h3>
+            <div id="fallbackDetail" class="rounded-xl bg-surface-950 border border-surface-800 p-2.5 text-xs text-slate-300"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab: Raw JSON -->
+      <div id="panel-json" class="tab-panel hidden p-4 overflow-y-auto max-h-[460px]">
+        <pre id="jsonOut" class="text-[11px] font-mono text-slate-300 bg-surface-950 rounded-xl p-3 border border-surface-800 whitespace-pre-wrap break-all m-0">（扫码后在这里显示完整 JSON）</pre>
+      </div>
+
+      <!-- Tab: History -->
+      <div id="panel-history" class="tab-panel hidden p-4 flex flex-col gap-3 overflow-y-auto max-h-[460px]">
+        <div class="flex items-center gap-2">
+          <input id="historySearch" type="text" placeholder="搜索单号 / 快递公司…"
+            class="flex-1 px-3 py-1.5 rounded-lg bg-surface-950 border border-surface-700 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500">
+          <button id="btnExportCsv" type="button"
+            class="px-2.5 py-1.5 rounded-lg bg-surface-800 hover:bg-surface-700 border border-surface-600 text-xs text-slate-200">
+            导出 CSV
+          </button>
+          <button id="btnClearHistory" type="button"
+            class="px-2.5 py-1.5 rounded-lg bg-surface-800 hover:bg-rose-950/60 border border-surface-700 text-xs text-rose-300">
+            清空
+          </button>
+        </div>
+        <div id="historyList" class="flex flex-col gap-2 text-xs"></div>
+      </div>
+
+      <!-- Tab: Rules -->
+      <div id="panel-rules" class="tab-panel hidden p-4 flex flex-col gap-3 overflow-y-auto max-h-[460px]">
+        <div class="flex gap-2">
+          <input id="ruleTestInput" type="text" placeholder="输入文本或单号测试规则，例如：运单号 SF123456789012"
+            class="flex-1 px-3 py-1.5 rounded-lg bg-surface-950 border border-surface-700 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500">
+          <button id="btnRuleTest" type="button"
+            class="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium">
+            测试
+          </button>
+        </div>
+        <div id="ruleTestOutput" class="hidden rounded-xl bg-surface-950 border border-surface-800 px-3 py-2 text-xs"></div>
+        <div id="rulesTable" class="flex flex-col gap-1.5 text-xs"></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<!-- Settings Modal: Configurable Fallback API & Frontend Engine Paths -->
+<div id="settingsModal" class="hidden fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+  <div class="bg-surface-900 border border-surface-700 rounded-2xl w-full max-w-xl max-h-[90vh] flex flex-col overflow-hidden shadow-2xl">
+    <div class="px-5 py-3.5 border-b border-surface-800 flex items-center justify-between">
+      <div>
+        <h2 class="text-sm font-semibold text-white">API 与前端模型配置</h2>
+        <p class="text-[11px] text-slate-400 mt-0.5">默认无外部 API，纯前端运行；可按需启用 OpenAI 兼容 LLM 辅助或自定义 Fallback API</p>
+      </div>
+      <button id="btnCloseSettings" type="button" class="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-surface-800">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+        </svg>
+      </button>
+    </div>
+
+    <div class="flex border-b border-surface-800 bg-surface-950/60 px-5 pt-2 gap-2 text-xs">
+      <button type="button" data-cfgtab="llm" class="cfg-tab-btn px-3 py-2 font-medium rounded-t-lg border-b-2 border-violet-500 text-violet-300 bg-surface-900">
+        LLM 辅助（OpenAI 兼容）
+      </button>
+      <button type="button" data-cfgtab="fallback" class="cfg-tab-btn px-3 py-2 font-medium rounded-t-lg border-b-2 border-transparent text-slate-400 hover:text-slate-200">
+        Fallback API
+      </button>
+    </div>
+
+    <div class="p-5 overflow-y-auto flex flex-col gap-4 text-xs">
+      <!-- Config Tab: OpenAI-compatible LLM -->
+      <div id="cfgPanel-llm" class="cfg-panel flex flex-col gap-4">
+        <div class="flex items-center justify-between p-3 rounded-xl bg-surface-950 border border-surface-800">
+          <div>
+            <div class="font-medium text-slate-200">启用 OpenAI 兼容 LLM 辅助</div>
+            <div class="text-[11px] text-slate-400 mt-0.5">默认关闭。支持视觉多模态识图或纯文本 OCR 纠错与面单信息提取</div>
+          </div>
+          <label class="relative inline-flex items-center cursor-pointer">
+            <input id="cfgLlmEnabled" type="checkbox" class="sr-only peer">
+            <div class="w-10 h-5 bg-surface-700 rounded-full peer peer-checked:bg-violet-600 after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-5"></div>
+          </label>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div class="sm:col-span-2">
+            <label class="block text-slate-300 font-medium mb-1">Base URL（OpenAI 兼容）</label>
+            <input id="cfgLlmBaseUrl" type="url" placeholder="https://api.openai.com/v1"
+              class="w-full px-3 py-2 rounded-lg bg-surface-950 border border-surface-700 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-violet-500">
+          </div>
+          <div>
+            <label class="block text-slate-300 font-medium mb-1">Model 名称</label>
+            <input id="cfgLlmModel" type="text" placeholder="gpt-4o-mini"
+              class="w-full px-3 py-2 rounded-lg bg-surface-950 border border-surface-700 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-violet-500">
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div class="sm:col-span-2">
+            <label class="block text-slate-300 font-medium mb-1">API Key</label>
+            <input id="cfgLlmApiKey" type="password" placeholder="sk-..."
+              class="w-full px-3 py-2 rounded-lg bg-surface-950 border border-surface-700 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-violet-500">
+          </div>
+          <div>
+            <label class="block text-slate-300 font-medium mb-1">超时时间 (ms)</label>
+            <input id="cfgLlmTimeout" type="number" min="2000" max="120000" step="1000"
+              class="w-full px-3 py-2 rounded-lg bg-surface-950 border border-surface-700 text-slate-200 focus:outline-none focus:border-violet-500">
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label class="block text-slate-300 font-medium mb-1">辅助模式</label>
+            <select id="cfgLlmMode" class="w-full px-2.5 py-2 rounded-lg bg-surface-950 border border-surface-700 text-slate-200 focus:outline-none focus:border-violet-500">
+              <option value="vision_and_text">视觉多模态 + 前端文本（推荐，需视觉模型）</option>
+              <option value="text_only">纯文本纠错与提取（仅发条码/OCR 文本）</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-slate-300 font-medium mb-1">触发时机</label>
+            <select id="cfgLlmTriggerMode" class="w-full px-2.5 py-2 rounded-lg bg-surface-950 border border-surface-700 text-slate-200 focus:outline-none focus:border-violet-500">
+              <option value="on_no_tracking">前端条码与 OCR 未命中单号时</option>
+              <option value="always_assist">每次识别后自动辅助校验与结构化</option>
+              <option value="manual_only">仅手动点击「LLM 辅助」时</option>
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-slate-300 font-medium mb-1">系统提示词（留空使用内置 JSON 提取提示词）</label>
+          <textarea id="cfgLlmPrompt" rows="2" placeholder="可选：自定义 System Prompt（建议要求返回 JSON）"
+            class="w-full px-3 py-2 rounded-lg bg-surface-950 border border-surface-700 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-violet-500"></textarea>
+        </div>
+
+        <div class="flex items-center gap-2">
+          <button id="btnTestLlm" type="button"
+            class="px-3 py-1.5 rounded-lg bg-violet-600/20 hover:bg-violet-600/35 text-violet-200 border border-violet-500/40 text-xs font-medium transition">
+            测试 LLM 连通性
+          </button>
+        </div>
+      </div>
+
+      <!-- Config Tab: Fallback API -->
+      <div id="cfgPanel-fallback" class="cfg-panel hidden flex flex-col gap-4">
+      <!-- Enable Switch -->
+      <div class="flex items-center justify-between p-3 rounded-xl bg-surface-950 border border-surface-800">
+        <div>
+          <div class="font-medium text-slate-200">启用 Fallback API 兜底</div>
+          <div class="text-[11px] text-slate-400 mt-0.5">默认关闭。仅在配置有效 Endpoint URL 并开启后才会发起外部请求</div>
+        </div>
+        <label class="relative inline-flex items-center cursor-pointer">
+          <input id="cfgEnabled" type="checkbox" class="sr-only peer">
+          <div class="w-10 h-5 bg-surface-700 rounded-full peer peer-checked:bg-blue-600 after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-5"></div>
+        </label>
+      </div>
+
+      <!-- Endpoint & Method -->
+      <div class="grid grid-cols-1 sm:grid-cols-4 gap-3">
+        <div class="sm:col-span-3">
+          <label class="block text-slate-300 font-medium mb-1">API Endpoint URL</label>
+          <input id="cfgEndpoint" type="url" placeholder="https://api.example.com/v1/express/scan（留空即无 Fallback）"
+            class="w-full px-3 py-2 rounded-lg bg-surface-950 border border-surface-700 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500">
+        </div>
+        <div>
+          <label class="block text-slate-300 font-medium mb-1">HTTP 方法</label>
+          <select id="cfgMethod" class="w-full px-2.5 py-2 rounded-lg bg-surface-950 border border-surface-700 text-slate-200 focus:outline-none focus:border-blue-500">
+            <option value="POST">POST</option>
+            <option value="PUT">PUT</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Trigger Mode & Payload Format -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div>
+          <label class="block text-slate-300 font-medium mb-1">触发时机</label>
+          <select id="cfgTriggerMode" class="w-full px-2.5 py-2 rounded-lg bg-surface-950 border border-surface-700 text-slate-200 focus:outline-none focus:border-blue-500">
+            <option value="on_no_tracking">前端条码与 OCR 均未命中单号时（推荐）</option>
+            <option value="on_no_barcode">前端未扫到有效条码时（跳过 OCR 或并行）</option>
+            <option value="manual_only">仅手动点击「调用 Fallback API」时</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-slate-300 font-medium mb-1">请求体格式</label>
+          <select id="cfgPayloadFormat" class="w-full px-2.5 py-2 rounded-lg bg-surface-950 border border-surface-700 text-slate-200 focus:outline-none focus:border-blue-500">
+            <option value="multipart">multipart/form-data（上传图片文件）</option>
+            <option value="json">application/json（Base64 编码）</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Field Name & Timeout -->
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div>
+          <label class="block text-slate-300 font-medium mb-1">图片字段名</label>
+          <input id="cfgFileField" type="text" placeholder="file"
+            class="w-full px-3 py-2 rounded-lg bg-surface-950 border border-surface-700 text-slate-200 focus:outline-none focus:border-blue-500">
+        </div>
+        <div>
+          <label class="block text-slate-300 font-medium mb-1">超时时间 (ms)</label>
+          <input id="cfgTimeout" type="number" min="1000" max="120000" step="1000"
+            class="w-full px-3 py-2 rounded-lg bg-surface-950 border border-surface-700 text-slate-200 focus:outline-none focus:border-blue-500">
+        </div>
+        <div class="flex items-end pb-2">
+          <label class="inline-flex items-center gap-2 cursor-pointer text-slate-300">
+            <input id="cfgIncludeCtx" type="checkbox" class="rounded bg-surface-950 border-surface-600 text-blue-600">
+            <span>附带前端结果上下文</span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Auth Settings -->
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div>
+          <label class="block text-slate-300 font-medium mb-1">鉴权方式</label>
+          <select id="cfgAuthType" class="w-full px-2.5 py-2 rounded-lg bg-surface-950 border border-surface-700 text-slate-200 focus:outline-none focus:border-blue-500">
+            <option value="none">无鉴权</option>
+            <option value="bearer">Bearer Token</option>
+            <option value="header">自定义 Header</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-slate-300 font-medium mb-1">Header 名称</label>
+          <input id="cfgAuthHeader" type="text" placeholder="X-API-Key"
+            class="w-full px-3 py-2 rounded-lg bg-surface-950 border border-surface-700 text-slate-200 focus:outline-none focus:border-blue-500">
+        </div>
+        <div>
+          <label class="block text-slate-300 font-medium mb-1">Token / Key 值</label>
+          <input id="cfgAuthToken" type="password" placeholder="可选密钥"
+            class="w-full px-3 py-2 rounded-lg bg-surface-950 border border-surface-700 text-slate-200 focus:outline-none focus:border-blue-500">
+        </div>
+      </div>
+
+      <!-- Custom Headers & Response Mapping -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div>
+          <label class="block text-slate-300 font-medium mb-1">单号响应字段路径（可选）</label>
+          <input id="cfgRespTrackPath" type="text" placeholder="留空自动识别，如 data.tracking_number"
+            class="w-full px-3 py-2 rounded-lg bg-surface-950 border border-surface-700 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500">
+        </div>
+        <div>
+          <label class="block text-slate-300 font-medium mb-1">额外请求头 JSON（可选）</label>
+          <input id="cfgCustomHeaders" type="text" placeholder='{"X-Client":"express-scan"}'
+            class="w-full px-3 py-2 rounded-lg bg-surface-950 border border-surface-700 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500">
+        </div>
+      </div>
+
+      </div>
+
+      <!-- Frontend Model Paths (Advanced) -->
+      <details class="rounded-xl bg-surface-950 border border-surface-800 p-3">
+        <summary class="cursor-pointer font-medium text-slate-300 select-none">高级：前端模型路径配置（OCR / YOLO）</summary>
+        <div class="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label class="block text-slate-400 mb-1">OCR 语言包目录 (langPath)</label>
+            <input id="cfgOcrLangPath" type="text" placeholder="./models/"
+              class="w-full px-2.5 py-1.5 rounded-lg bg-surface-900 border border-surface-700 text-slate-200 focus:outline-none focus:border-blue-500">
+          </div>
+          <div>
+            <label class="block text-slate-400 mb-1">YOLO ONNX 模型路径</label>
+            <input id="cfgYoloModelUrl" type="text" placeholder="./models/yolov8n.onnx"
+              class="w-full px-2.5 py-1.5 rounded-lg bg-surface-900 border border-surface-700 text-slate-200 focus:outline-none focus:border-blue-500">
+          </div>
+        </div>
+      </details>
+
+      <!-- Test Result Area -->
+      <div id="cfgTestResult" class="hidden rounded-xl bg-surface-950 border border-surface-800 p-3 font-mono text-[11px] whitespace-pre-wrap break-all"></div>
+    </div>
+
+    <div class="px-5 py-3.5 border-t border-surface-800 flex flex-wrap items-center justify-between gap-2 bg-surface-950/60">
+      <div class="flex items-center gap-2">
+        <button id="btnResetConfig" type="button"
+          class="px-3 py-1.5 rounded-lg bg-surface-800 hover:bg-rose-950/60 text-rose-300 border border-surface-700 text-xs font-medium transition">
+          重置为默认（无 Fallback）
+        </button>
+        <button id="btnTestApi" type="button"
+          class="px-3 py-1.5 rounded-lg bg-surface-800 hover:bg-surface-700 text-slate-200 border border-surface-600 text-xs font-medium transition">
+          测试连通性
+        </button>
+      </div>
+      <button id="btnSaveConfig" type="button"
+        class="px-4 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium transition">
+        保存配置
+      </button>
+    </div>
+  </div>
 </div>
-<button id="btnStop" hidden>⏹ 停止</button>
 
-<div id="videoWrap" hidden>
-  <video id="video" playsinline muted></video>
-  <canvas id="frame" hidden></canvas>
-</div>
-
-<canvas id="yoloCanvas" hidden></canvas>
-
-<div id="engine"></div>
-<div id="status">准备就绪：拍照上传在任何浏览器可用；实时扫码需 HTTPS 或 localhost。</div>
-
-<div id="card">
-  <div id="tracking">—</div>
-  <div id="meta"></div>
-  <pre id="jsonOut">（扫码后在这里显示 JSON）</pre>
-  <button id="btnCopy" hidden>复制 JSON</button>
-</div>
-
-<div id="toast"></div>
+<!-- Toast Notification -->
+<div id="toast" class="fixed left-1/2 bottom-6 -translate-x-1/2 z-50 px-4 py-2 rounded-full bg-surface-800 border border-surface-600 text-slate-100 text-xs font-medium shadow-xl opacity-0 pointer-events-none transition-opacity duration-200"></div>
 
 <script>
 'use strict';
-/* =====================================================================
- * M0 纯前端快递单号识别：BarcodeDetector（原生）+ ZXing-js（CDN 兜底）
- * 输出 JSON 与方案笔记 schema 一致：barcodes.{1d,2d} + tracking_number
- * 单号规则为示意，随快递公司版本变化，以官方为准。
- * ===================================================================== */
 
-// ---------- 单号规则（示意） ----------
+/* ============================================================================
+ * express-scan · 纯前端快递单号识别系统
+ * 架构：
+ *   1. 前端条码解码：原生 BarcodeDetector → ZXing-js (CDN) + 图像增强（对比度/多角度旋转）
+ *   2. 前端 OCR 兜底：Tesseract.js（支持同源 ./models/ 自动回退官方 CDN）
+ *   3. 前端 YOLO 检测：onnxruntime-web (WebGPU/WASM)，自动兼容 [1,84,N] 与 [1,N,84] + ROI 裁剪二次识别
+ *   4. 可配置 Fallback API：默认不存在（enabled=false, endpoint=""），按需配置后通过标准 fetch 调用
+ * ============================================================================ */
+
+const STORAGE_CFG_KEY = 'express_scan_config_v2';
+const STORAGE_HIST_KEY = 'express_scan_history_v2';
+
+// 默认配置：明确不存在任何 Fallback API
+const DEFAULT_CONFIG = {
+  fallback: {
+    enabled: false,
+    endpoint: '',
+    method: 'POST',
+    triggerMode: 'on_no_tracking', // on_no_tracking | on_no_barcode | manual_only
+    payloadFormat: 'multipart',    // multipart | json
+    fileFieldName: 'file',
+    includeFrontendContext: true,
+    authType: 'none',              // none | bearer | header
+    authHeaderName: 'X-API-Key',
+    authToken: '',
+    customHeaders: '',
+    timeoutMs: 15000,
+    responseTrackingPath: ''
+  },
+  llm: {
+    enabled: false,
+    baseUrl: '',
+    apiKey: '',
+    model: '',
+    mode: 'vision_and_text',       // vision_and_text | text_only
+    triggerMode: 'on_no_tracking', // on_no_tracking | always_assist | manual_only
+    timeoutMs: 25000,
+    systemPrompt: ''
+  },
+  models: {
+    ocrLang: 'chi_sim',
+    ocrLangPath: './models/',
+    yoloModelUrl: './models/yolov8n.onnx'
+  }
+};
+
+const DEFAULT_LLM_SYSTEM_PROMPT =
+  '你是快递面单识别助手。根据提供的面单图片和/或前端条码与OCR文本，准确提取快递单号、快递公司及收件信息。' +
+  '严禁编造单号，排除11位中国大陆手机号。只返回严格JSON（不要Markdown代码块），格式：' +
+  '{"tracking_number":"单号或null","company":"sf|jt|yto|zto|yunda|sto|jd|ems|dbl|cn|other","company_name":"快递公司名或null","recipient":"收件人或null","phone":"手机号或null","address":"地址或null","confidence":0.95,"reason":"简短依据"}';
+
+// ---------- 快递单号规则（按特征优先级排序，避免手机号误判） ----------
 const RULES = [
-  { company:'sf',    name:'顺丰',    re:/^SF\d{12}$/i },
-  { company:'ems',   name:'EMS/邮政', re:/^[A-Z]{2}\d{9}CN$/i },
-  { company:'yto',   name:'圆通',    re:/^(YT\d{13}|\d{13})$/i },
-  { company:'zto',   name:'中通',    re:/^\d{12,14}$/ },
-  { company:'yunda', name:'韵达',    re:/^\d{13}$/ },
-  { company:'sto',   name:'申通',    re:/^\d{12,15}$/ },
-  { company:'jd',    name:'京东',    re:/^(JD\d{12,13}|\d{13})$/i },
-  { company:'dbl',   name:'德邦',    re:/^(DBL|DPK)\d{10,12}$/i },
+  { company: 'sf',    name: '顺丰速运',   priority: 1, re: /^SF\d{12,13}$/i,                extract: /\bSF[\s-]?\d{12,13}\b/gi, desc: 'SF + 12~13位数字' },
+  { company: 'jt',    name: '极兔速递',   priority: 1, re: /^JT\d{13}$/i,                   extract: /\bJT[\s-]?\d{13}\b/gi, desc: 'JT + 13位数字' },
+  { company: 'yto',   name: '圆通速递',   priority: 1, re: /^YT\d{13}$/i,                   extract: /\bYT[\s-]?\d{13}\b/gi, desc: 'YT + 13位数字' },
+  { company: 'jd',    name: '京东物流',   priority: 1, re: /^JD[A-Z0-9]{11,13}$/i,          extract: /\bJD[A-Z0-9]{11,13}\b/gi, desc: 'JD + 11~13位字母数字' },
+  { company: 'ems',   name: 'EMS/邮政',   priority: 1, re: /^[A-Z]{2}\d{9}CN$/i,            extract: /\b[A-Z]{2}\d{9}CN\b/gi, desc: '2位字母 + 9位数字 + CN' },
+  { company: 'dbl',   name: '德邦快递',   priority: 1, re: /^(DBL|DPK)\d{10,12}$/i,         extract: /\b(?:DBL|DPK)\d{10,12}\b/gi, desc: 'DBL/DPK + 10~12位数字' },
+  { company: 'sto',   name: '申通快递',   priority: 2, re: /^77\d{13}$/,                    extract: /\b77\d{13}\b/g, desc: '77开头 15位数字' },
+  { company: 'zto',   name: '中通快递',   priority: 2, re: /^7[3568]\d{12}$/,               extract: /\b7[3568]\d{12}\b/g, desc: '73/75/76/78开头 14位数字' },
+  { company: 'yunda', name: '韵达快递',   priority: 2, re: /^(?:4[36]\d{11,13}|31\d{11})$/, extract: /\b(?:4[36]\d{11,13}|31\d{11})\b/g, desc: '43/46开头13~15位 或 31开头13位' },
+  { company: 'ems_n', name: '邮政包裹',   priority: 2, re: /^9\d{12}$/,                     extract: /\b9\d{12}\b/g, desc: '9开头 13位数字' },
+  { company: 'cn',    name: '菜鸟/通用',  priority: 3, re: /^\d{12,15}$/,                   extract: /\b\d{12,15}\b/g, desc: '12~15位纯数字单号（排除11位手机号）' }
 ];
-function matchRule(s) {
-  s = String(s || '').replace(/\s+/g, '').toUpperCase();
-  for (const r of RULES) if (r.re.test(s)) return r;
+
+const PHONE_RE = /^1[3-9]\d{9}$/;
+
+function normalizeToken(s) {
+  return String(s || '').replace(/[\s\-_:：]+/g, '').toUpperCase();
+}
+
+function matchRuleExact(raw) {
+  const s = normalizeToken(raw);
+  if (!s || PHONE_RE.test(s)) return null;
+  for (const r of RULES) {
+    if (r.re.test(s)) return { value: s, rule: r };
+  }
   return null;
 }
 
-// ---------- 格式分类 ----------
-const FMT_1D = new Set(['code_128','code_39','code_93','codabar','ean_13','ean_8','upc_a','upc_e','itf']);
-const FMT_2D = new Set(['qr_code','data_matrix','aztec','pdf417']);
-function classify(fmt) { return FMT_2D.has(fmt) ? '2d' : '1d'; }
+function extractTrackingFromText(text) {
+  const raw = String(text || '');
+  if (!raw.trim()) return null;
+  // 先尝试整行清洗后精确匹配
+  const exact = matchRuleExact(raw);
+  if (exact) return exact;
 
-// ---------- 引擎初始化：原生 BarcodeDetector → ZXing CDN 兜底 ----------
-let engine = null;              // {kind:'native', detector} | {kind:'zxing', reader}
-const ZXING_URLS = [
-  'https://unpkg.com/@zxing/browser@0.1.5/dist/browser.min.js',
-  'https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.5/dist/browser.min.js',
-];
+  // 再按优先级提取子串（支持“运单号：SF123456789012”等带前缀文本）
+  const cleaned = raw.replace(/[：:]/g, ' ');
+  for (const r of RULES) {
+    r.extract.lastIndex = 0;
+    let m;
+    while ((m = r.extract.exec(cleaned)) !== null) {
+      const candidate = normalizeToken(m[0]);
+      if (candidate && !PHONE_RE.test(candidate) && r.re.test(candidate)) {
+        return { value: candidate, rule: r };
+      }
+    }
+  }
+  return null;
+}
+
+// ---------- 状态与配置管理 ----------
+let appConfig = loadConfig();
+let scanHistory = loadHistory();
+let engine = null;          // { kind: 'native', detector, formats } | { kind: 'zxing', reader }
+let ocrWorker = null;
+let ocrLoadedLang = null;
+let yoloSession = null;
+let yoloLoadedUrl = null;
+let enhanceEnabled = true;
+let ocrEnabled = true;
+let yoloEnabled = false;
+let lastJson = null;
+let lastFile = null;
+let stream = null;
+let liveTimer = null;
+let zxingControls = null;
+let facingMode = 'environment';
+let activeTab = 'overview';
+
+function cloneDefaultConfig() {
+  return JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+}
+
+function loadConfig() {
+  const base = cloneDefaultConfig();
+  try {
+    const saved = localStorage.getItem(STORAGE_CFG_KEY);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (parsed && parsed.fallback) Object.assign(base.fallback, parsed.fallback);
+      if (parsed && parsed.llm) Object.assign(base.llm, parsed.llm);
+      if (parsed && parsed.models) Object.assign(base.models, parsed.models);
+    }
+  } catch (e) {}
+
+  // 支持宿主通过 window.EXPRESS_SCAN_CONFIG 或 URL ?fallback_api=... 显式注入
+  try {
+    if (window.EXPRESS_SCAN_CONFIG && typeof window.EXPRESS_SCAN_CONFIG === 'object') {
+      if (window.EXPRESS_SCAN_CONFIG.fallback) Object.assign(base.fallback, window.EXPRESS_SCAN_CONFIG.fallback);
+      if (window.EXPRESS_SCAN_CONFIG.llm) Object.assign(base.llm, window.EXPRESS_SCAN_CONFIG.llm);
+      if (window.EXPRESS_SCAN_CONFIG.models) Object.assign(base.models, window.EXPRESS_SCAN_CONFIG.models);
+    }
+    const qs = new URLSearchParams(window.location.search);
+    const apiParam = qs.get('fallback_api');
+    if (apiParam && /^https?:\/\//i.test(apiParam)) {
+      base.fallback.endpoint = apiParam.trim();
+      base.fallback.enabled = true;
+    }
+  } catch (e) {}
+
+  return base;
+}
+
+function saveConfig(cfg) {
+  appConfig = cfg;
+  try { localStorage.setItem(STORAGE_CFG_KEY, JSON.stringify(cfg)); } catch (e) {}
+  updateFallbackIndicators();
+}
+
+function isFallbackConfigured() {
+  const fb = appConfig.fallback;
+  return Boolean(fb && fb.enabled && fb.endpoint && fb.endpoint.trim().length > 0);
+}
+
+function isLlmConfigured() {
+  const llm = appConfig.llm;
+  return Boolean(llm && llm.enabled && llm.baseUrl && llm.baseUrl.trim() && llm.model && llm.model.trim());
+}
+
+function loadHistory() {
+  try {
+    const raw = localStorage.getItem(STORAGE_HIST_KEY);
+    const arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function saveHistory() {
+  try { localStorage.setItem(STORAGE_HIST_KEY, JSON.stringify(scanHistory.slice(0, 50))); } catch (e) {}
+}
+
+// ---------- DOM 工具 ----------
+const $ = id => document.getElementById(id);
+
+function setStatus(msg) {
+  $('statusBar').textContent = msg;
+}
+
+let toastTimer = null;
+function showToast(msg) {
+  const el = $('toast');
+  el.textContent = msg;
+  el.classList.remove('opacity-0');
+  el.classList.add('opacity-100');
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    el.classList.remove('opacity-100');
+    el.classList.add('opacity-0');
+  }, 1800);
+}
+
+function setStep(stepId, label, state) {
+  const box = $(stepId);
+  if (!box) return;
+  const val = box.querySelector('.step-val');
+  val.textContent = label;
+  box.className = 'rounded-xl p-2.5 border transition ';
+  if (state === 'ok') {
+    box.className += 'bg-emerald-500/10 border-emerald-500/40';
+    val.className = 'step-val font-medium text-emerald-300 mt-0.5';
+  } else if (state === 'running') {
+    box.className += 'bg-blue-500/10 border-blue-500/40';
+    val.className = 'step-val font-medium text-blue-300 mt-0.5';
+  } else if (state === 'warn') {
+    box.className += 'bg-amber-500/10 border-amber-500/40';
+    val.className = 'step-val font-medium text-amber-300 mt-0.5';
+  } else if (state === 'error') {
+    box.className += 'bg-rose-500/10 border-rose-500/40';
+    val.className = 'step-val font-medium text-rose-300 mt-0.5';
+  } else {
+    box.className += 'bg-surface-950 border-surface-800';
+    val.className = 'step-val font-medium text-slate-400 mt-0.5';
+  }
+}
+
+function updateFallbackIndicators() {
+  const fbActive = isFallbackConfigured();
+  const llmActive = isLlmConfigured();
+  const dot = $('fallbackDot');
+  const txt = $('fallbackBadgeText');
+  const manualFbBtn = $('btnManualFallback');
+  const manualLlmBtn = $('btnManualLlm');
+
+  if (fbActive && llmActive) {
+    dot.className = 'w-2 h-2 rounded-full bg-emerald-400';
+    txt.textContent = 'LLM + Fallback 已启用';
+  } else if (llmActive) {
+    dot.className = 'w-2 h-2 rounded-full bg-violet-400';
+    txt.textContent = 'LLM：' + appConfig.llm.model;
+  } else if (fbActive) {
+    dot.className = 'w-2 h-2 rounded-full bg-emerald-400';
+    try {
+      const u = new URL(appConfig.fallback.endpoint);
+      txt.textContent = 'Fallback：' + u.host;
+    } catch (e) {
+      txt.textContent = 'Fallback：已启用';
+    }
+  } else {
+    dot.className = 'w-2 h-2 rounded-full bg-slate-500';
+    txt.textContent = '无外部 API（默认）';
+  }
+
+  manualFbBtn.disabled = !(fbActive && lastFile);
+  manualLlmBtn.disabled = !(llmActive && (lastFile || lastJson));
+  setStep('stepFallback', fbActive ? '已就绪' : '未配置', 'idle');
+  setStep('stepLlm', llmActive ? '已就绪' : '未配置', 'idle');
+}
+
+// ---------- 动态脚本加载 ----------
+const loadedScripts = new Set();
 function loadScript(url) {
-  return new Promise((res, rej) => {
+  if (loadedScripts.has(url)) return Promise.resolve();
+  return new Promise((resolve, reject) => {
     const s = document.createElement('script');
-    s.src = url; s.onload = () => res(); s.onerror = () => rej(new Error('加载失败 ' + url));
+    s.src = url;
+    s.onload = () => { loadedScripts.add(url); resolve(); };
+    s.onerror = () => reject(new Error('脚本加载失败: ' + url));
     document.head.appendChild(s);
   });
 }
-async function initEngine() {
+
+// ---------- 1. 前端条码引擎初始化：BarcodeDetector → ZXing-js ----------
+const FMT_2D = new Set(['qr_code', 'data_matrix', 'aztec', 'pdf417']);
+function classifyFormat(fmt) {
+  return FMT_2D.has(String(fmt || '').toLowerCase()) ? '2d' : '1d';
+}
+
+const ZXING_URLS = [
+  'https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.5/umd/zxing-browser.min.js',
+  'https://unpkg.com/@zxing/browser@0.1.5/umd/zxing-browser.min.js',
+  'https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js'
+];
+
+async function initBarcodeEngine() {
   if ('BarcodeDetector' in window) {
     const full = ['code_128','code_39','code_93','codabar','ean_13','ean_8','itf','upc_a','upc_e','qr_code','data_matrix','aztec','pdf417'];
-    const min  = ['code_128','code_39','ean_13','ean_8','qr_code'];
+    const min = ['code_128','code_39','ean_13','ean_8','qr_code'];
     for (const fmts of [full, min]) {
-      try { engine = { kind:'native', detector: new BarcodeDetector({ formats: fmts }) }; return; } catch (e) { /* 换最小集重试 */ }
+      try {
+        const detector = new BarcodeDetector({ formats: fmts });
+        engine = { kind: 'native', detector, formats: fmts };
+        $('engineBadge').textContent = '引擎：原生 BarcodeDetector（' + fmts.length + ' 种条码格式）';
+        return;
+      } catch (e) {}
     }
   }
   for (const url of ZXING_URLS) {
-    try { await loadScript(url); if (window.ZXing && window.ZXing.BrowserMultiFormatReader) {
-      engine = { kind:'zxing', reader: new window.ZXing.BrowserMultiFormatReader() }; return; } } catch (e) { /* 换下一个源 */ }
+    try {
+      await loadScript(url);
+      if (window.ZXingBrowser && window.ZXingBrowser.BrowserMultiFormatReader) {
+        engine = { kind: 'zxing', reader: new window.ZXingBrowser.BrowserMultiFormatReader() };
+        $('engineBadge').textContent = '引擎：ZXing-js（纯前端解码）';
+        return;
+      }
+      if (window.ZXing && window.ZXing.BrowserMultiFormatReader) {
+        engine = { kind: 'zxing', reader: new window.ZXing.BrowserMultiFormatReader() };
+        $('engineBadge').textContent = '引擎：ZXing-js（纯前端解码）';
+        return;
+      }
+    } catch (e) {}
   }
-  throw new Error('当前浏览器无 BarcodeDetector 且 ZXing CDN 加载失败，请换 Chrome/Safari 新版');
+  engine = null;
+  $('engineBadge').textContent = '条码引擎不可用（将仅依赖前端 OCR 或已配置的 Fallback API）';
 }
 
-// ---------- 结果归一化 ----------
 function zxingFmtName(f) {
   try {
-    const B = window.ZXing && window.ZXing.BarcodeFormat;
+    const B = (window.ZXingBrowser && window.ZXingBrowser.BarcodeFormat) || (window.ZXing && window.ZXing.BarcodeFormat);
     if (B) for (const k in B) if (B[k] === f) return String(k).toLowerCase();
     if (f && f.name) return String(f.name).toLowerCase();
   } catch (e) {}
-  return 'unknown';
+  return 'code_128';
 }
+
 function zxingPoints(r) {
-  const pts = r.getResultPoints && r.getResultPoints();
+  const pts = r && r.getResultPoints && r.getResultPoints();
   if (!pts) return [];
   return pts.filter(Boolean).map(p => [Math.round(p.getX()), Math.round(p.getY())]);
 }
+
 function nativeItems(dets) {
-  return dets.filter(d => d.rawValue).map(d => ({
-    format: String(d.format || '').toLowerCase(),
+  return (dets || []).filter(d => d && d.rawValue).map(d => ({
+    format: String(d.format || 'unknown').toLowerCase(),
     data: d.rawValue,
-    points: (d.cornerPoints || []).map(p => [Math.round(p.x), Math.round(p.y)]),
+    points: (d.cornerPoints || []).map(p => [Math.round(p.x), Math.round(p.y)])
   }));
 }
-function buildJson(items, srcName, t0) {
-  const b1 = [], b2 = [];
-  for (const it of items) {
-    const bucket = classify(it.format) === '2d' ? b2 : b1;
-    bucket.push({ format: (it.format || 'unknown').toUpperCase(), data: it.data, points: it.points || [], confidence: 0.99 });
-  }
-  let tn = null;
-  for (const it of items) {
-    const r = matchRule(it.data);
-    if (r) {
-      tn = { value: it.data.replace(/\s+/g, '').toUpperCase(), company: r.company, company_name: r.name,
-             method: classify(it.format) === '2d' ? 'barcode_2d' : 'barcode_1d',
-             confidence: 1.0, status: 'ok' };
-      break;
-    }
-  }
-  return {
-    request_id: (crypto.randomUUID ? crypto.randomUUID() : 'r' + Math.random().toString(36).slice(2)),
-    status: tn ? 'ok' : (items.length ? 'partial' : 'failed'),
-    latency_ms: Math.round(performance.now() - t0),
-    source: srcName,
-    barcodes: { '1d': b1, '2d': b2 },
-    ocr: { full_text: null, lines: [], tracking_number: tn },   // OCR 兜底属 M1，本期留空
-  };
-}
-function render(json) {
-  const el = document.getElementById('tracking'), meta = document.getElementById('meta');
-  const tn = json.ocr.tracking_number;
-  el.className = json.status;
-  if (tn) { el.textContent = '【' + tn.value + '】 ' + (tn.company_name || ''); }
-  else if (json.status === 'partial') { el.textContent = '扫到条码，但未识别为快递单号'; }
-  else { el.textContent = '未识别到条码 / 单号'; }
-  meta.textContent = 'status=' + json.status + ' · latency=' + json.latency_ms + 'ms · ' + json.source
-    + ' · 1d=' + json.barcodes['1d'].length + ' · 2d=' + json.barcodes['2d'].length
-    + (json.ocr && json.ocr.tracking_number ? ' · ocr=hit' : (json.ocr && json.ocr.lines && json.ocr.lines.length ? ' · ocr=no_hit' : ' · ocr=off'))
-    + (json.yolo ? ' · yolo=' + json.yolo.detections.length : '');
-  document.getElementById('jsonOut').textContent = JSON.stringify(json, null, 2);
-  document.getElementById('btnCopy').hidden = false;
-  lastJson = json;
-}
-let lastJson = null;
-let lastFile = null;
 
-// ---------- 拍照/选图上传（任何环境可用） ----------
-async function onFile(file) {
-  lastFile = file;
-  const t0 = performance.now();
-  status('正在解码条码…');
-  let items = [];
+async function detectOnCanvas(canvas) {
+  if (!engine) return [];
   try {
     if (engine.kind === 'native') {
-      const bmp = await createImageBitmap(file);
-      items = nativeItems(await engine.detector.detect(bmp));
-      bmp.close();
-    } else {
-      const r = await engine.reader.decodeFromImageFile(file);
-      items = [{ format: zxingFmtName(r.getBarcodeFormat()), data: r.getText(), points: zxingPoints(r) }];
+      const dets = await engine.detector.detect(canvas);
+      return nativeItems(dets);
+    } else if (engine.kind === 'zxing') {
+      if (typeof engine.reader.decodeFromCanvas === 'function') {
+        const r = engine.reader.decodeFromCanvas(canvas);
+        if (r && r.getText()) {
+          return [{ format: zxingFmtName(r.getBarcodeFormat()), data: r.getText(), points: zxingPoints(r) }];
+        }
+      } else {
+        const dataUrl = canvas.toDataURL('image/png');
+        const r = await engine.reader.decodeFromImageUrl(dataUrl);
+        if (r && r.getText()) {
+          return [{ format: zxingFmtName(r.getBarcodeFormat()), data: r.getText(), points: zxingPoints(r) }];
+        }
+      }
     }
-  } catch (e) { items = []; }
-  let json = buildJson(items, 'photo', t0);
-  // OCR 兜底：仅当条码未出有效单号时触发（保证 fallback，失败即跳过，不影响条码结果）
-  if (json.status !== 'ok' && ocrEnabled) {
-    const ocr = await runOcr(file);
-    if (ocr) {
-      json.ocr = ocr;
-      if (ocr.tracking_number) { json.status = 'ok'; }
-    }
-  }
-  render(json);
-  const ocrMethod = json.ocr && json.ocr.tracking_number && json.ocr.tracking_number.method === 'ocr';
-  status(json.status === 'ok'
-    ? (ocrMethod ? '✅ OCR 兜底命中：' + json.ocr.tracking_number.value : '✅ 解码完成')
-    : (items.length ? '扫到条码但未识别为快递单号；OCR 兜底' + (json.ocr ? ' 已尝试未命中' : ' 未触发') : '未检出条码：拍正、光线均匀' + (json.ocr ? '；OCR 兜底已尝试未命中' : (ocrEnabled ? '；OCR 兜底触发中…' : '；OCR 兜底已关闭'))));
+  } catch (e) {}
+  return [];
 }
 
-// ---------- 实时扫码 ----------
-const video = document.getElementById('video'), frame = document.getElementById('frame');
-const fctx = frame.getContext('2d');
-let stream = null, liveTimer = null, zxingControls = null;
-async function startLive() {
-  const wrap = document.getElementById('videoWrap');
-  wrap.hidden = false; document.getElementById('btnStop').hidden = false;
-  status('正在开启相机…（实时扫码需 HTTPS 或 localhost；file:// 可能被浏览器拒绝，可用拍照上传）');
-  try {
-    if (engine.kind === 'zxing') {
-      zxingControls = await engine.reader.decodeFromVideoDevice(undefined, video, res => {
-        if (res) { stopLive(); render(buildJson([{ format: zxingFmtName(res.getBarcodeFormat()), data: res.getText(), points: zxingPoints(res) }], 'live', performance.now())); }
-      });
-    } else {
-      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
-      video.srcObject = stream; await video.play();
-      liveTimer = setInterval(scanFrame, 250);
-    }
-  } catch (e) {
-    status('相机打不开：' + e.message + ' —— 请用"拍照/选图"上传');
-    stopLive();
-  }
-}
-async function scanFrame() {
-  if (!video.videoWidth) return;
-  const w = Math.min(video.videoWidth, 960);
-  const h = Math.round(video.videoHeight * w / video.videoWidth);
-  frame.width = w; frame.height = h;
-  fctx.drawImage(video, 0, 0, w, h);
-  let dets = [];
-  try { dets = await engine.detector.detect(frame); } catch (e) {}
-  const found = dets.filter(d => d.rawValue);
-  if (found.length) {
-    stopLive();
-    render(buildJson(nativeItems(found), 'live', performance.now()));
-  }
-}
-function stopLive() {
-  if (liveTimer) { clearInterval(liveTimer); liveTimer = null; }
-  if (zxingControls) { try { zxingControls.stop(); } catch (e) {} zxingControls = null; }
-  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
-  video.srcObject = null;
-  document.getElementById('videoWrap').hidden = true;
-  document.getElementById('btnStop').hidden = true;
+function loadBitmapOrImage(blob) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+    img.onerror = err => { URL.revokeObjectURL(url); reject(err); };
+    img.src = url;
+  });
 }
 
-// ---------- OCR 兜底（扩展功能 M1：条码失效时用 Tesseract.js 提取单号） ----------
-// 保证 fallback：引擎/模型/网络任一失败 → 返回 null，调用方跳过，条码结果不受影响。
-// 升级位：PaddleOCR.js（官方 PP-OCRv5 浏览器 SDK）待核实 API 后可在 loadOcrEngine 里前置接入。
-let ocrWorker = null;
-let ocrEnabled = true;
-const OCR_LANG = 'chi_sim';
-const OCR_LANG_PATH = './models/';   // chi_sim.traineddata.gz 同源托管；jsdelivr gh 分支是 gh-pages 且文件超其 20MB 上限，CDN 不可用
+function createPreprocessedCanvas(img, mode) {
+  const maxDim = 1600;
+  let w = img.naturalWidth || img.width;
+  let h = img.naturalHeight || img.height;
+  const scale = Math.min(1, maxDim / Math.max(w, h));
+  w = Math.max(1, Math.round(w * scale));
+  h = Math.max(1, Math.round(h * scale));
+
+  const cv = document.createElement('canvas');
+  const ctx = cv.getContext('2d');
+
+  if (mode === 'rotate90') {
+    cv.width = h; cv.height = w;
+    ctx.translate(h, 0);
+    ctx.rotate(Math.PI / 2);
+    ctx.drawImage(img, 0, 0, w, h);
+    return { canvas: cv, scale, rotated: true };
+  }
+
+  cv.width = w; cv.height = h;
+  ctx.drawImage(img, 0, 0, w, h);
+
+  if (mode === 'contrast') {
+    const imgData = ctx.getImageData(0, 0, w, h);
+    const d = imgData.data;
+    for (let i = 0; i < d.length; i += 4) {
+      const gray = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+      // 线性对比度拉伸
+      const v = Math.max(0, Math.min(255, (gray - 128) * 1.65 + 128));
+      d[i] = d[i + 1] = d[i + 2] = v;
+    }
+    ctx.putImageData(imgData, 0, 0);
+  }
+  return { canvas: cv, scale, rotated: false };
+}
+
+async function decodeBarcodesMultiPass(blob) {
+  if (!engine) return { items: [], pass: 'no_engine' };
+  const img = await loadBitmapOrImage(blob);
+
+  // Pass 1: 原图
+  const p1 = createPreprocessedCanvas(img, 'original');
+  let items = await detectOnCanvas(p1.canvas);
+  if (items.some(it => extractTrackingFromText(it.data))) {
+    return { items: rescaleItems(items, p1.scale), pass: 'original' };
+  }
+
+  if (!enhanceEnabled) {
+    return { items: rescaleItems(items, p1.scale), pass: 'original' };
+  }
+
+  // Pass 2: 灰度高对比度增强
+  const p2 = createPreprocessedCanvas(img, 'contrast');
+  const items2 = await detectOnCanvas(p2.canvas);
+  if (items2.length) {
+    const merged = mergeUniqueBarcodes(rescaleItems(items, p1.scale), rescaleItems(items2, p2.scale));
+    if (merged.some(it => extractTrackingFromText(it.data))) {
+      return { items: merged, pass: 'contrast' };
+    }
+    items = merged;
+  } else {
+    items = rescaleItems(items, p1.scale);
+  }
+
+  // Pass 3: 旋转 90°（应对竖拍或倒置条码）
+  const p3 = createPreprocessedCanvas(img, 'rotate90');
+  const items3 = await detectOnCanvas(p3.canvas);
+  if (items3.length) {
+    const unrotated = items3.map(it => ({
+      ...it,
+      points: (it.points || []).map(([rx, ry]) => [
+        Math.round(ry / p3.scale),
+        Math.round((p3.canvas.width - rx) / p3.scale)
+      ])
+    }));
+    items = mergeUniqueBarcodes(items, unrotated);
+    return { items, pass: 'rotate90' };
+  }
+
+  return { items, pass: 'enhanced_all' };
+}
+
+function rescaleItems(items, scale) {
+  if (!scale || scale === 1) return items;
+  return items.map(it => ({
+    ...it,
+    points: (it.points || []).map(([x, y]) => [Math.round(x / scale), Math.round(y / scale)])
+  }));
+}
+
+function mergeUniqueBarcodes(a, b) {
+  const seen = new Set(a.map(x => x.format + '|' + x.data));
+  const out = a.slice();
+  for (const item of b) {
+    const k = item.format + '|' + item.data;
+    if (!seen.has(k)) { seen.add(k); out.push(item); }
+  }
+  return out;
+}
+
+// ---------- 2. 前端 OCR 兜底（Tesseract.js，同源优先 → CDN 自动降级） ----------
+async function ensureTesseractLoaded() {
+  if (typeof window.Tesseract !== 'undefined') return true;
+  const urls = [
+    'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js',
+    'https://unpkg.com/tesseract.js@5.1.1/dist/tesseract.min.js'
+  ];
+  for (const url of urls) {
+    try {
+      await loadScript(url);
+      if (typeof window.Tesseract !== 'undefined') return true;
+    } catch (e) {}
+  }
+  return false;
+}
+
 async function loadOcrEngine() {
-  if (ocrWorker) return true;
-  if (typeof Tesseract === 'undefined') {
-    try { await loadScript('https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js'); } catch (e) {}
-    if (typeof Tesseract === 'undefined') return false;
+  const targetLang = appConfig.models.ocrLang || 'chi_sim';
+  const targetPath = appConfig.models.ocrLangPath || './models/';
+  const cacheKey = targetLang + '@' + targetPath;
+  if (ocrWorker && ocrLoadedLang === cacheKey) return true;
+
+  if (!(await ensureTesseractLoaded())) return false;
+  if (ocrWorker) {
+    try { await ocrWorker.terminate(); } catch (e) {}
+    ocrWorker = null;
   }
-  try {
-    ocrWorker = await Tesseract.createWorker(OCR_LANG, 1, { langPath: OCR_LANG_PATH });
-    return true;
-  } catch (e) { return false; }
+
+  // 优先尝试配置的同源模型路径；若单独在非同源环境打开，则自动降级到官方快速模型 CDN
+  const attempts = [
+    { lang: targetLang, opts: { langPath: targetPath } },
+    { lang: 'chi_sim', opts: { langPath: 'https://tessdata.projectnaptha.com/4.0.0_fast' } },
+    { lang: 'eng', opts: { langPath: 'https://tessdata.projectnaptha.com/4.0.0_fast' } }
+  ];
+
+  for (const att of attempts) {
+    try {
+      ocrWorker = await window.Tesseract.createWorker(att.lang, 1, att.opts);
+      ocrLoadedLang = cacheKey;
+      return true;
+    } catch (e) {}
+  }
+  return false;
 }
-async function runOcr(file) {
+
+async function runOcr(blob) {
   const t0 = performance.now();
-  status('条码未命中 → OCR 兜底：加载引擎/模型…（首次需联网下载，之后有缓存）');
+  setStep('stepOcr', '加载模型…', 'running');
+  setStatus('条码未命中有效单号 → 启动纯前端 OCR（首次需加载语言模型）…');
   const ok = await loadOcrEngine();
-  if (!ok) { status('OCR 引擎/模型加载失败（离线或 CDN 不可达）——已跳过，条码结果不受影响'); return null; }
-  status('OCR 识别中…（首次下载模型可能较慢）');
+  if (!ok) {
+    setStep('stepOcr', '引擎加载失败', 'warn');
+    setStatus('前端 OCR 引擎/模型加载失败（离线或网络受限）——已安全跳过。');
+    return null;
+  }
+  setStep('stepOcr', '文字识别中…', 'running');
+  setStatus('纯前端 OCR 正在识别面单文字…');
   try {
-    const { data } = await ocrWorker.recognize(file);
+    const { data } = await ocrWorker.recognize(blob);
     const lines = [];
-    for (const block of data.blocks || [])
-      for (const par of block.paragraphs || [])
+    for (const block of (data && data.blocks) || []) {
+      for (const par of block.paragraphs || []) {
         for (const ln of par.lines || []) {
           const text = (ln.text || '').trim();
-          if (text) lines.push({ text, confidence: Math.round(((ln.confidence || 0) / 100) * 100) / 100 });
+          if (text) lines.push({ text, confidence: Math.round(ln.confidence || 0) / 100 });
         }
-    const full_text = lines.map(l => l.text).join('\n');
+      }
+    }
+    const full_text = lines.length ? lines.map(l => l.text).join('\n') : String((data && data.text) || '').trim();
+
     let tn = null;
     for (const l of lines) {
-      const r = matchRule(l.text);
-      if (r) { tn = { value: l.text.replace(/\s+/g, '').toUpperCase(), company: r.company, company_name: r.name, method: 'ocr', confidence: l.confidence, status: 'ok' }; break; }
+      const m = extractTrackingFromText(l.text);
+      if (m) {
+        tn = {
+          value: m.value,
+          company: m.rule.company,
+          company_name: m.rule.name,
+          method: 'ocr',
+          confidence: l.confidence || 0.85,
+          status: 'ok'
+        };
+        break;
+      }
     }
-    return { full_text, lines, tracking_number: tn, latency_ms: Math.round(performance.now() - t0) };
-  } catch (e) { return null; }
+    if (!tn && full_text) {
+      const m = extractTrackingFromText(full_text);
+      if (m) {
+        tn = {
+          value: m.value,
+          company: m.rule.company,
+          company_name: m.rule.name,
+          method: 'ocr',
+          confidence: 0.8,
+          status: 'ok'
+        };
+      }
+    }
+
+    const latency_ms = Math.round(performance.now() - t0);
+    setStep('stepOcr', tn ? '命中 · ' + latency_ms + 'ms' : '未命中 · ' + latency_ms + 'ms', tn ? 'ok' : 'warn');
+    return { full_text, lines, tracking_number: tn, latency_ms, ran: true };
+  } catch (e) {
+    setStep('stepOcr', '识别异常', 'warn');
+    return null;
+  }
 }
 
-// ---------- YOLO 检测（扩展功能：预训练 YOLOv8n，onnxruntime-web 纯前端推理） ----------
-// 保证 fallback：引擎/模型/推理任一失败 → 返回 null，调用方跳过，不影响扫码/OCR。
-// 权重路径 ./models/yolov8n.onnx（同源 GH Pages 托管）——将来换成微调后的"单号区域"检测权重即换功能，无需改代码。
-let yoloSession = null;
-const YOLO_MODEL_URL = './models/yolov8n.onnx';
+// ---------- 3. 前端 YOLO 检测（onnxruntime-web，修复维度布局 + ROI 裁剪二次识别） ----------
 const YOLO_SIZE = 640;
-const YOLO_CONF = 0.25, YOLO_IOU = 0.45;
+const YOLO_CONF = 0.25;
+const YOLO_IOU = 0.45;
 const COCO_CLASSES = ['person','bicycle','car','motorcycle','airplane','bus','train','truck','boat','traffic light','fire hydrant','stop sign','parking meter','bench','bird','cat','dog','horse','sheep','cow','elephant','bear','zebra','giraffe','backpack','umbrella','handbag','tie','suitcase','frisbee','skis','snowboard','sports ball','kite','baseball bat','baseball glove','skateboard','surfboard','tennis racket','bottle','wine glass','cup','fork','knife','spoon','bowl','banana','apple','sandwich','orange','broccoli','carrot','hot dog','pizza','donut','cake','chair','couch','potted plant','bed','dining table','toilet','tv','laptop','mouse','remote','keyboard','cell phone','microwave','oven','toaster','sink','refrigerator','book','clock','vase','scissors','teddy bear','hair drier','toothbrush'];
+
 async function loadOrt() {
   if (window.ort) return true;
   try { await loadScript('https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.0/dist/ort.min.js'); } catch (e) {}
   return !!window.ort;
 }
+
 async function loadYolo() {
-  if (yoloSession) return true;
+  const modelUrl = appConfig.models.yoloModelUrl || './models/yolov8n.onnx';
+  if (yoloSession && yoloLoadedUrl === modelUrl) return true;
   if (!(await loadOrt())) return false;
   try {
-    yoloSession = await ort.InferenceSession.create(YOLO_MODEL_URL, { executionProviders: ['webgpu', 'wasm'] });
+    yoloSession = await window.ort.InferenceSession.create(modelUrl, { executionProviders: ['webgpu', 'wasm'] });
+    yoloLoadedUrl = modelUrl;
     return true;
-  } catch (e) { return false; }
+  } catch (e) {
+    return false;
+  }
 }
+
 function letterbox(img, size) {
-  const iw = img.width, ih = img.height;
+  const iw = img.naturalWidth || img.width;
+  const ih = img.naturalHeight || img.height;
   const scale = Math.min(size / iw, size / ih);
-  const nw = Math.round(iw * scale), nh = Math.round(ih * scale);
-  const padX = (size - nw) / 2, padY = (size - nh) / 2;
+  const nw = Math.round(iw * scale);
+  const nh = Math.round(ih * scale);
+  const padX = (size - nw) / 2;
+  const padY = (size - nh) / 2;
   const canvas = document.createElement('canvas');
   canvas.width = size; canvas.height = size;
   const ctx = canvas.getContext('2d');
-  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, size, size);
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, size, size);
   ctx.drawImage(img, padX, padY, nw, nh);
   const imageData = ctx.getImageData(0, 0, size, size);
   const data = new Float32Array(3 * size * size);
+  const area = size * size;
   let p = 0;
-  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
-    const idx = (y * size + x) * 4;
-    data[p] = imageData.data[idx] / 255;
-    data[p + size * size] = imageData.data[idx + 1] / 255;
-    data[p + 2 * size * size] = imageData.data[idx + 2] / 255;
-    p++;
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const idx = (y * size + x) * 4;
+      data[p] = imageData.data[idx] / 255;
+      data[p + area] = imageData.data[idx + 1] / 255;
+      data[p + 2 * area] = imageData.data[idx + 2] / 255;
+      p++;
+    }
   }
-  return { data, scale, padX, padY };
+  return { data, scale, padX, padY, imgW: iw, imgH: ih };
 }
-function iou(a, b) {
+
+function boxIou(a, b) {
   const ax1 = a[0], ay1 = a[1], ax2 = a[0] + a[2], ay2 = a[1] + a[3];
   const bx1 = b[0], by1 = b[1], bx2 = b[0] + b[2], by2 = b[1] + b[3];
   const ix = Math.max(0, Math.min(ax2, bx2) - Math.max(ax1, bx1));
@@ -367,148 +1267,1608 @@ function iou(a, b) {
   const union = a[2] * a[3] + b[2] * b[3] - inter;
   return union > 0 ? inter / union : 0;
 }
-function postprocessYolo(out, scale, padX, padY) {
-  const num = out.length / 84;
+
+// 自动兼容 YOLOv8 标准输出 [1, C, N]（通道优先）和 [1, N, C]
+function postprocessYolo(outputTensor, scale, padX, padY) {
+  const out = outputTensor.data;
+  const dims = outputTensor.dims || [];
+  let numBoxes = 0;
+  let numChannels = 84;
+  let channelFirst = true;
+
+  if (dims.length === 3) {
+    if (dims[1] < dims[2]) {
+      numChannels = dims[1];
+      numBoxes = dims[2];
+      channelFirst = true;
+    } else {
+      numBoxes = dims[1];
+      numChannels = dims[2];
+      channelFirst = false;
+    }
+  } else {
+    numBoxes = Math.floor(out.length / 84);
+  }
+
+  const numClasses = numChannels - 4;
   const cands = [];
-  for (let i = 0; i < num; i++) {
-    const base = i * 84;
-    const cx = out[base], cy = out[base + 1], w = out[base + 2], h = out[base + 3];
-    let best = -1, bestScore = 0;
-    for (let c = 4; c < 84; c++) { const s = out[base + c]; if (s > bestScore) { bestScore = s; best = c - 4; } }
+
+  for (let i = 0; i < numBoxes; i++) {
+    const cx = channelFirst ? out[0 * numBoxes + i] : out[i * numChannels + 0];
+    const cy = channelFirst ? out[1 * numBoxes + i] : out[i * numChannels + 1];
+    const w  = channelFirst ? out[2 * numBoxes + i] : out[i * numChannels + 2];
+    const h  = channelFirst ? out[3 * numBoxes + i] : out[i * numChannels + 3];
+
+    let best = -1;
+    let bestScore = 0;
+    for (let c = 0; c < numClasses; c++) {
+      const s = channelFirst ? out[(4 + c) * numBoxes + i] : out[i * numChannels + (4 + c)];
+      if (s > bestScore) { bestScore = s; best = c; }
+    }
     if (bestScore >= YOLO_CONF) {
-      cands.push({ cls: best, score: bestScore,
-        box: [(cx - w / 2 - padX) / scale, (cy - h / 2 - padY) / scale, w / scale, h / scale] });
+      cands.push({
+        cls: best,
+        score: bestScore,
+        box: [(cx - w / 2 - padX) / scale, (cy - h / 2 - padY) / scale, w / scale, h / scale]
+      });
     }
   }
+
   cands.sort((a, b) => b.score - a.score);
   const picked = [];
   for (const c of cands) {
     let dup = false;
-    for (const p of picked) { if (p.cls === c.cls && iou(p.box, c.box) > YOLO_IOU) { dup = true; break; } }
+    for (const p of picked) {
+      if (p.cls === c.cls && boxIou(p.box, c.box) > YOLO_IOU) { dup = true; break; }
+    }
     if (!dup) picked.push(c);
   }
-  return picked.map(d => ({ class: COCO_CLASSES[d.cls] || String(d.cls), score: Math.round(d.score * 100) / 100, box: d.box.map(v => Math.round(v)) }));
+  return picked.map(d => ({
+    class: COCO_CLASSES[d.cls] || ('class_' + d.cls),
+    score: Math.round(d.score * 100) / 100,
+    box: d.box.map(v => Math.max(0, Math.round(v)))
+  }));
 }
-async function runYolo(blob) {
+
+async function runYoloAndRoi(blob) {
   const t0 = performance.now();
-  status('YOLO：加载引擎/模型…（首次需联网加载 ort 引擎；模型 ~13MB 同源，之后走浏览器缓存）');
-  if (!(await loadYolo())) { status('YOLO 引擎/模型加载失败——已跳过，不影响扫码/OCR'); return null; }
-  status('YOLO 推理中…（WebGPU 可用则加速，否则 WASM）');
+  setStatus('YOLO：正在加载 onnxruntime-web 与 ONNX 模型…');
+  if (!(await loadYolo())) {
+    setStatus('YOLO 模型加载失败（请确认模型路径 ' + (appConfig.models.yoloModelUrl || './models/yolov8n.onnx') + ' 可访问）——已安全跳过。');
+    return null;
+  }
+  setStatus('YOLO：正在浏览器端推理（WebGPU / WASM）…');
   try {
-    const bmp = await createImageBitmap(blob);
-    const imgW = bmp.width, imgH = bmp.height;
-    const { data, scale, padX, padY } = letterbox(bmp, YOLO_SIZE);
-    bmp.close();
+    const img = await loadBitmapOrImage(blob);
+    const { data, scale, padX, padY, imgW, imgH } = letterbox(img, YOLO_SIZE);
     const feeds = {};
-    feeds[yoloSession.inputNames[0]] = new ort.Tensor('float32', data, [1, 3, YOLO_SIZE, YOLO_SIZE]);
+    feeds[yoloSession.inputNames[0]] = new window.ort.Tensor('float32', data, [1, 3, YOLO_SIZE, YOLO_SIZE]);
     const outputs = await yoloSession.run(feeds);
-    const out = outputs[yoloSession.outputNames[0]].data;
-    const detections = postprocessYolo(out, scale, padX, padY);
-    return { engine: 'onnxruntime-web', ep: (navigator.gpu ? 'webgpu' : 'wasm') + '|wasm', imgW, imgH,
-             detections, latency_ms: Math.round(performance.now() - t0) };
-  } catch (e) { return null; }
+    const outputTensor = outputs[yoloSession.outputNames[0]];
+    const detections = postprocessYolo(outputTensor, scale, padX, padY);
+
+    // 若检出区域，对前 3 个高置信度区域裁剪放大并尝试二次条码识别
+    let roiTracking = null;
+    if (detections.length && engine) {
+      for (const det of detections.slice(0, 3)) {
+        const [bx, by, bw, bh] = det.box;
+        if (bw < 24 || bh < 24) continue;
+        const pad = 12;
+        const sx = Math.max(0, bx - pad);
+        const sy = Math.max(0, by - pad);
+        const sw = Math.min(imgW - sx, bw + pad * 2);
+        const sh = Math.min(imgH - sy, bh + pad * 2);
+        const roiCv = document.createElement('canvas');
+        roiCv.width = sw; roiCv.height = sh;
+        roiCv.getContext('2d').drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+        const roiItems = await detectOnCanvas(roiCv);
+        for (const it of roiItems) {
+          const m = extractTrackingFromText(it.data);
+          if (m) {
+            roiTracking = {
+              value: m.value,
+              company: m.rule.company,
+              company_name: m.rule.name,
+              method: 'yolo_roi_barcode',
+              confidence: 0.99,
+              status: 'ok'
+            };
+            break;
+          }
+        }
+        if (roiTracking) break;
+      }
+    }
+
+    return {
+      engine: 'onnxruntime-web',
+      ep: navigator.gpu ? 'webgpu|wasm' : 'wasm',
+      imgW,
+      imgH,
+      detections,
+      roi_tracking: roiTracking,
+      latency_ms: Math.round(performance.now() - t0)
+    };
+  } catch (e) {
+    setStatus('YOLO 推理异常：' + e.message);
+    return null;
+  }
 }
-function drawYolo(blob, dets, imgW, imgH) {
-  const cv = document.getElementById('yoloCanvas');
-  if (!dets || !dets.length) { cv.hidden = true; return; }
-  cv.hidden = false;
-  cv.width = imgW; cv.height = imgH;
+
+// ---------- 3.5 OpenAI 兼容 LLM 辅助处理（默认关闭） ----------
+function resolveChatCompletionsUrl(baseUrl) {
+  const clean = String(baseUrl || '').trim().replace(/\/+$/, '');
+  if (!clean) return '';
+  if (/\/chat\/completions$/i.test(clean)) return clean;
+  return clean + '/chat/completions';
+}
+
+async function compressImageForLlm(blob, maxSide) {
+  const img = await loadBitmapOrImage(blob);
+  const iw = img.naturalWidth || img.width;
+  const ih = img.naturalHeight || img.height;
+  const scale = Math.min(1, (maxSide || 1280) / Math.max(iw, ih));
+  const w = Math.max(1, Math.round(iw * scale));
+  const h = Math.max(1, Math.round(ih * scale));
+  const cv = document.createElement('canvas');
+  cv.width = w; cv.height = h;
+  cv.getContext('2d').drawImage(img, 0, 0, w, h);
+  return cv.toDataURL('image/jpeg', 0.82);
+}
+
+function extractJsonObject(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return null;
+  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const candidate = fenced ? fenced[1].trim() : raw;
+  try { return JSON.parse(candidate); } catch (e) {}
+  const first = candidate.indexOf('{');
+  const last = candidate.lastIndexOf('}');
+  if (first >= 0 && last > first) {
+    try { return JSON.parse(candidate.slice(first, last + 1)); } catch (e) {}
+  }
+  return null;
+}
+
+async function callLlmAssist(blob, frontendContext, cfgOverride) {
+  const llm = cfgOverride || appConfig.llm;
+  if (!llm || !llm.enabled || !llm.baseUrl || !llm.baseUrl.trim() || !llm.model || !llm.model.trim()) {
+    return null;
+  }
+  const url = resolveChatCompletionsUrl(llm.baseUrl);
+  const t0 = performance.now();
+  setStep('stepLlm', '推理中…', 'running');
+  setStatus('正在调用 LLM 辅助解析（' + llm.model.trim() + '）…');
+
+  const headers = { 'Content-Type': 'application/json' };
+  if (llm.apiKey && llm.apiKey.trim()) {
+    headers['Authorization'] = 'Bearer ' + llm.apiKey.trim();
+  }
+
+  const ctxSummary = {
+    barcodes_1d: ((frontendContext && frontendContext.barcodes && frontendContext.barcodes['1d']) || []).map(x => x.data),
+    barcodes_2d: ((frontendContext && frontendContext.barcodes && frontendContext.barcodes['2d']) || []).map(x => x.data),
+    ocr_text: (frontendContext && frontendContext.ocr && frontendContext.ocr.full_text) || ''
+  };
+  const userText = '前端识别上下文：' + JSON.stringify(ctxSummary) + '\n请提取快递单号与面单结构化信息并仅输出JSON。';
+
+  let userContent = userText;
+  if (llm.mode !== 'text_only' && blob) {
+    try {
+      const dataUrl = await compressImageForLlm(blob, 1280);
+      userContent = [
+        { type: 'text', text: userText },
+        { type: 'image_url', image_url: { url: dataUrl } }
+      ];
+    } catch (e) {}
+  }
+
+  const payload = {
+    model: llm.model.trim(),
+    temperature: 0.1,
+    messages: [
+      { role: 'system', content: (llm.systemPrompt && llm.systemPrompt.trim()) || DEFAULT_LLM_SYSTEM_PROMPT },
+      { role: 'user', content: userContent }
+    ]
+  };
+
+  const controller = new AbortController();
+  const timeoutMs = Math.max(2000, Number(llm.timeoutMs) || 25000);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(payload),
+      signal: controller.signal
+    });
+    clearTimeout(timer);
+
+    const text = await resp.text();
+    let rawJson = null;
+    try { rawJson = JSON.parse(text); } catch (e) { rawJson = { raw_text: text }; }
+    const latency_ms = Math.round(performance.now() - t0);
+
+    if (!resp.ok) {
+      const errMsg = (rawJson && rawJson.error && rawJson.error.message) || ('HTTP ' + resp.status);
+      setStep('stepLlm', 'HTTP ' + resp.status, 'error');
+      return {
+        invoked: true,
+        ok: false,
+        model: llm.model.trim(),
+        mode: llm.mode,
+        latency_ms,
+        tracking_number: null,
+        parsed: null,
+        usage: null,
+        error: errMsg
+      };
+    }
+
+    const content = rawJson && rawJson.choices && rawJson.choices[0] && rawJson.choices[0].message
+      ? rawJson.choices[0].message.content
+      : '';
+    const parsed = extractJsonObject(content);
+    let tn = null;
+
+    if (parsed && parsed.tracking_number && String(parsed.tracking_number).toLowerCase() !== 'null') {
+      const val = normalizeToken(parsed.tracking_number);
+      if (val && !PHONE_RE.test(val)) {
+        const matched = matchRuleExact(val);
+        tn = {
+          value: val,
+          company: (parsed.company && parsed.company !== 'other') ? parsed.company : (matched ? matched.rule.company : 'llm'),
+          company_name: parsed.company_name || (matched ? matched.rule.name : 'LLM 识别'),
+          method: 'llm_oai',
+          confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0.9,
+          status: 'ok'
+        };
+      }
+    } else if (content) {
+      const fallbackExtract = extractTrackingFromText(content);
+      if (fallbackExtract) {
+        tn = {
+          value: fallbackExtract.value,
+          company: fallbackExtract.rule.company,
+          company_name: fallbackExtract.rule.name,
+          method: 'llm_oai',
+          confidence: 0.85,
+          status: 'ok'
+        };
+      }
+    }
+
+    setStep('stepLlm', tn ? '命中 · ' + latency_ms + 'ms' : '完成 · ' + latency_ms + 'ms', tn ? 'ok' : 'warn');
+    return {
+      invoked: true,
+      ok: true,
+      model: llm.model.trim(),
+      mode: llm.mode,
+      latency_ms,
+      tracking_number: tn,
+      parsed: parsed || { raw_content: content },
+      usage: rawJson && rawJson.usage ? rawJson.usage : null,
+      error: null
+    };
+  } catch (err) {
+    clearTimeout(timer);
+    const latency_ms = Math.round(performance.now() - t0);
+    const msg = err && err.name === 'AbortError' ? ('请求超时（>' + timeoutMs + 'ms）') : (err && err.message ? err.message : '网络请求失败');
+    setStep('stepLlm', '请求失败', 'error');
+    return {
+      invoked: true,
+      ok: false,
+      model: llm.model.trim(),
+      mode: llm.mode,
+      latency_ms,
+      tracking_number: null,
+      parsed: null,
+      usage: null,
+      error: msg
+    };
+  }
+}
+
+// ---------- 4. 可配置 Fallback API 调用器（默认不存在） ----------
+function getByPath(obj, pathStr) {
+  if (!obj || !pathStr) return undefined;
+  return pathStr.split('.').reduce((acc, key) => (acc != null ? acc[key] : undefined), obj);
+}
+
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+function parseFallbackResponse(rawResp, customPath) {
+  let trackingValue = null;
+  let companyName = null;
+  let companyCode = null;
+  let confidence = 0.95;
+
+  if (customPath) {
+    const v = getByPath(rawResp, customPath.trim());
+    if (typeof v === 'string' && v.trim()) trackingValue = v.trim();
+  }
+
+  // 自动兼容 express-scan 标准 schema 及常见 API 响应结构
+  if (!trackingValue && rawResp && typeof rawResp === 'object') {
+    const candidates = [
+      rawResp.ocr && rawResp.ocr.tracking_number,
+      rawResp.tracking_number,
+      rawResp.data && rawResp.data.tracking_number,
+      rawResp.result && rawResp.result.tracking_number,
+      rawResp.trackingNumber,
+      rawResp.data && rawResp.data.trackingNumber,
+      rawResp.number,
+      rawResp.code
+    ];
+    for (const c of candidates) {
+      if (!c) continue;
+      if (typeof c === 'object' && c.value) {
+        trackingValue = String(c.value).trim();
+        companyCode = c.company || null;
+        companyName = c.company_name || c.companyName || null;
+        if (typeof c.confidence === 'number') confidence = c.confidence;
+        break;
+      }
+      if (typeof c === 'string' && c.trim() && c.trim().length >= 8) {
+        trackingValue = c.trim();
+        break;
+      }
+    }
+  }
+
+  if (!trackingValue) return null;
+  const matched = matchRuleExact(trackingValue);
+  return {
+    value: normalizeToken(trackingValue),
+    company: companyCode || (matched ? matched.rule.company : 'api'),
+    company_name: companyName || (matched ? matched.rule.name : 'Fallback API'),
+    method: 'fallback_api',
+    confidence,
+    status: 'ok'
+  };
+}
+
+async function callFallbackApi(blob, frontendContext) {
+  if (!isFallbackConfigured()) {
+    return null;
+  }
+  const fb = appConfig.fallback;
+  const t0 = performance.now();
+  setStep('stepFallback', '请求中…', 'running');
+  setStatus('正在调用已配置的 Fallback API：' + fb.endpoint);
+
+  const headers = {};
+  if (fb.authType === 'bearer' && fb.authToken) {
+    headers['Authorization'] = 'Bearer ' + fb.authToken;
+  } else if (fb.authType === 'header' && fb.authHeaderName && fb.authToken) {
+    headers[fb.authHeaderName] = fb.authToken;
+  }
+  if (fb.customHeaders && fb.customHeaders.trim()) {
+    try {
+      const extra = JSON.parse(fb.customHeaders);
+      if (extra && typeof extra === 'object') Object.assign(headers, extra);
+    } catch (e) {}
+  }
+
+  let body;
+  const fieldName = (fb.fileFieldName || 'file').trim();
+  if (fb.payloadFormat === 'json') {
+    headers['Content-Type'] = 'application/json';
+    const dataUrl = await blobToBase64(blob);
+    const commaIdx = dataUrl.indexOf(',');
+    const payload = {
+      [fieldName]: dataUrl,
+      image_base64: commaIdx >= 0 ? dataUrl.slice(commaIdx + 1) : dataUrl,
+      mime_type: blob.type || 'image/png',
+      filename: blob.name || 'waybill.png'
+    };
+    if (fb.includeFrontendContext && frontendContext) {
+      payload.frontend_result = {
+        barcodes: frontendContext.barcodes,
+        ocr: frontendContext.ocr
+      };
+    }
+    body = JSON.stringify(payload);
+  } else {
+    const form = new FormData();
+    form.append(fieldName, blob, blob.name || 'waybill.png');
+    if (fb.includeFrontendContext && frontendContext) {
+      form.append('frontend_result', JSON.stringify({
+        barcodes: frontendContext.barcodes,
+        ocr: frontendContext.ocr
+      }));
+    }
+    body = form;
+  }
+
+  const controller = new AbortController();
+  const timeoutMs = Math.max(1000, Number(fb.timeoutMs) || 15000);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const resp = await fetch(fb.endpoint.trim(), {
+      method: fb.method || 'POST',
+      headers,
+      body,
+      signal: controller.signal
+    });
+    clearTimeout(timer);
+
+    const text = await resp.text();
+    let parsed = null;
+    try { parsed = JSON.parse(text); } catch (e) { parsed = { raw_text: text }; }
+    const latency_ms = Math.round(performance.now() - t0);
+
+    if (!resp.ok) {
+      setStep('stepFallback', 'HTTP ' + resp.status, 'error');
+      return {
+        invoked: true,
+        ok: false,
+        endpoint: fb.endpoint.trim(),
+        status_code: resp.status,
+        latency_ms,
+        tracking_number: null,
+        error: 'HTTP ' + resp.status + ' ' + resp.statusText,
+        raw_response: parsed
+      };
+    }
+
+    const tn = parseFallbackResponse(parsed, fb.responseTrackingPath);
+    setStep('stepFallback', tn ? '命中 · ' + latency_ms + 'ms' : '无单号 · ' + latency_ms + 'ms', tn ? 'ok' : 'warn');
+    return {
+      invoked: true,
+      ok: true,
+      endpoint: fb.endpoint.trim(),
+      status_code: resp.status,
+      latency_ms,
+      tracking_number: tn,
+      error: null,
+      raw_response: parsed
+    };
+  } catch (err) {
+    clearTimeout(timer);
+    const latency_ms = Math.round(performance.now() - t0);
+    const msg = err && err.name === 'AbortError' ? ('请求超时（>' + timeoutMs + 'ms）') : (err && err.message ? err.message : '网络请求失败');
+    setStep('stepFallback', '请求失败', 'error');
+    return {
+      invoked: true,
+      ok: false,
+      endpoint: fb.endpoint.trim(),
+      status_code: 0,
+      latency_ms,
+      tracking_number: null,
+      error: msg,
+      raw_response: null
+    };
+  }
+}
+
+// ---------- 结果构建与画布渲染 ----------
+function buildBaseJson(items, source, t0, passName) {
+  const b1 = [];
+  const b2 = [];
+  for (const it of items) {
+    const bucket = classifyFormat(it.format) === '2d' ? b2 : b1;
+    bucket.push({
+      format: String(it.format || 'unknown').toUpperCase(),
+      data: it.data,
+      points: it.points || [],
+      confidence: 0.99
+    });
+  }
+
+  let tn = null;
+  for (const it of items) {
+    const m = extractTrackingFromText(it.data);
+    if (m) {
+      tn = {
+        value: m.value,
+        company: m.rule.company,
+        company_name: m.rule.name,
+        method: classifyFormat(it.format) === '2d' ? 'barcode_2d' : 'barcode_1d',
+        confidence: 1.0,
+        status: 'ok'
+      };
+      break;
+    }
+  }
+
+  return {
+    request_id: (crypto.randomUUID ? crypto.randomUUID() : 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6)),
+    status: tn ? 'ok' : (items.length ? 'partial' : 'failed'),
+    latency_ms: Math.round(performance.now() - t0),
+    source,
+    decode_pass: passName || 'direct',
+    barcodes: { '1d': b1, '2d': b2 },
+    ocr: { full_text: null, lines: [], tracking_number: tn, ran: false },
+    tracking_number: tn,
+    yolo: null,
+    llm: null,
+    fallback: null
+  };
+}
+
+async function renderPreviewCanvas(blob, barcodes, yoloDets) {
+  if (!blob) return;
+  const img = await loadBitmapOrImage(blob);
+  const cv = $('previewCanvas');
+  const w = img.naturalWidth || img.width;
+  const h = img.naturalHeight || img.height;
+  cv.width = w;
+  cv.height = h;
   const ctx = cv.getContext('2d');
-  const img = new Image();
-  img.onload = () => {
-    ctx.drawImage(img, 0, 0);
-    const lw = Math.max(2, imgW / 300), fs = Math.max(13, imgW / 40);
-    ctx.lineWidth = lw; ctx.strokeStyle = '#ff5252';
-    ctx.font = fs + 'px sans-serif';
-    for (const d of dets) {
-      ctx.strokeRect(d.box[0], d.box[1], d.box[2], d.box[3]);
-      ctx.fillStyle = 'rgba(255,82,82,.85)';
-      ctx.fillText(d.class + ' ' + d.score, d.box[0], Math.max(fs, d.box[1] - 6));
+  ctx.drawImage(img, 0, 0, w, h);
+
+  const lw = Math.max(2, Math.round(w / 260));
+  const fs = Math.max(14, Math.round(w / 38));
+  ctx.font = 'bold ' + fs + 'px sans-serif';
+
+  // 绘制条码框（绿色）
+  const allBarcodes = [...(barcodes['1d'] || []), ...(barcodes['2d'] || [])];
+  for (const b of allBarcodes) {
+    if (!b.points || b.points.length < 2) continue;
+    ctx.strokeStyle = '#10b981';
+    ctx.lineWidth = lw;
+    ctx.beginPath();
+    ctx.moveTo(b.points[0][0], b.points[0][1]);
+    for (let i = 1; i < b.points.length; i++) ctx.lineTo(b.points[i][0], b.points[i][1]);
+    ctx.closePath();
+    ctx.stroke();
+
+    const label = b.format + ': ' + b.data;
+    const x0 = b.points[0][0];
+    const y0 = Math.max(fs + 6, b.points[0][1] - 8);
+    const tw = ctx.measureText(label).width;
+    ctx.fillStyle = 'rgba(16, 185, 129, 0.9)';
+    ctx.fillRect(x0, y0 - fs, tw + 12, fs + 6);
+    ctx.fillStyle = '#042f2e';
+    ctx.fillText(label, x0 + 6, y0 - 2);
+  }
+
+  // 绘制 YOLO 检测框（红色）
+  for (const d of (yoloDets || [])) {
+    const [bx, by, bw, bh] = d.box;
+    ctx.strokeStyle = '#f43f5e';
+    ctx.lineWidth = lw;
+    ctx.strokeRect(bx, by, bw, bh);
+    const label = d.class + ' ' + d.score;
+    const y0 = Math.max(fs + 6, by - 6);
+    const tw = ctx.measureText(label).width;
+    ctx.fillStyle = 'rgba(244, 63, 94, 0.88)';
+    ctx.fillRect(bx, y0 - fs, tw + 10, fs + 6);
+    ctx.fillStyle = '#fff';
+    ctx.fillText(label, bx + 5, y0 - 2);
+  }
+
+  $('previewMeta').textContent = '图像尺寸 ' + w + '×' + h + ' · 条码 ' + allBarcodes.length + ' 个' + (yoloDets && yoloDets.length ? ' · YOLO ' + yoloDets.length + ' 个' : '');
+  $('previewCard').classList.remove('hidden');
+}
+
+function getEffectiveTracking(json) {
+  if (!json) return null;
+  return json.tracking_number || (json.ocr && json.ocr.tracking_number) || (json.llm && json.llm.tracking_number) || (json.fallback && json.fallback.tracking_number) || null;
+}
+
+function renderResult(json, pushHistory) {
+  if (!json) return;
+  lastJson = json;
+  const tn = getEffectiveTracking(json);
+  const trackingEl = $('trackingDisplay');
+  const compBadge = $('resultCompanyBadge');
+  const methodBadge = $('resultMethodBadge');
+
+  if (tn) {
+    trackingEl.textContent = tn.value;
+    trackingEl.className = 'text-2xl sm:text-3xl font-bold font-mono tracking-tight text-emerald-400 break-all';
+    compBadge.textContent = tn.company_name || tn.company || '快递单号';
+    compBadge.classList.remove('hidden');
+    const methodLabels = {
+      barcode_1d: '前端一维条码',
+      barcode_2d: '前端二维码',
+      ocr: '前端 OCR',
+      yolo_roi_barcode: 'YOLO ROI 条码',
+      llm_oai: 'LLM 辅助',
+      fallback_api: 'Fallback API',
+      manual_ocr_pick: '手动选取 OCR'
+    };
+    methodBadge.textContent = methodLabels[tn.method] || tn.method;
+    methodBadge.classList.remove('hidden');
+    $('btnCopyTracking').classList.remove('hidden');
+  } else if (json.status === 'partial') {
+    trackingEl.textContent = '扫到条码，但非快递单号';
+    trackingEl.className = 'text-xl sm:text-2xl font-bold tracking-tight text-amber-400';
+    compBadge.classList.add('hidden');
+    methodBadge.classList.add('hidden');
+    $('btnCopyTracking').classList.add('hidden');
+  } else {
+    trackingEl.textContent = '未识别到有效单号';
+    trackingEl.className = 'text-xl sm:text-2xl font-bold tracking-tight text-rose-400';
+    compBadge.classList.add('hidden');
+    methodBadge.classList.add('hidden');
+    $('btnCopyTracking').classList.add('hidden');
+  }
+
+  const b1Len = (json.barcodes && json.barcodes['1d'] ? json.barcodes['1d'].length : 0);
+  const b2Len = (json.barcodes && json.barcodes['2d'] ? json.barcodes['2d'].length : 0);
+  const ocrTag = json.ocr && json.ocr.ran ? (json.ocr.tracking_number ? 'OCR=命中' : 'OCR=未命中') : 'OCR=未触发';
+  const fbTag = json.fallback && json.fallback.invoked
+    ? (json.fallback.tracking_number ? 'Fallback=命中' : (json.fallback.ok ? 'Fallback=未命中' : 'Fallback=失败'))
+    : 'Fallback=未触发';
+
+  $('metaLine').textContent = '状态=' + json.status + ' · 总耗时=' + (json.latency_ms || 0) + 'ms · 来源=' + (json.source || '-') + ' · 1D=' + b1Len + ' · 2D=' + b2Len + ' · ' + ocrTag + ' · ' + fbTag;
+  $('jsonOut').textContent = JSON.stringify(json, null, 2);
+  $('btnCopyJson').disabled = false;
+  $('btnDownloadJson').disabled = false;
+  $('btnManualFallback').disabled = !(isFallbackConfigured() && lastFile);
+  $('btnManualLlm').disabled = !(isLlmConfigured() && (lastFile || lastJson));
+
+  renderOverviewTab(json);
+
+  if (pushHistory && (tn || b1Len || b2Len)) {
+    scanHistory.unshift({
+      id: json.request_id,
+      time: new Date().toLocaleString('zh-CN', { hour12: false }),
+      tracking: tn ? tn.value : '',
+      company: tn ? (tn.company_name || tn.company) : '未匹配规则',
+      method: tn ? tn.method : json.status,
+      latency_ms: json.latency_ms || 0,
+      json
+    });
+    scanHistory = scanHistory.slice(0, 50);
+    saveHistory();
+    renderHistoryTab();
+  }
+}
+
+function renderOverviewTab(json) {
+  $('overviewEmpty').classList.add('hidden');
+  $('overviewContent').classList.remove('hidden');
+
+  // Barcodes
+  const bList = $('barcodeList');
+  bList.innerHTML = '';
+  const all = [
+    ...((json.barcodes && json.barcodes['1d']) || []).map(x => ({ ...x, kind: '1D' })),
+    ...((json.barcodes && json.barcodes['2d']) || []).map(x => ({ ...x, kind: '2D' }))
+  ];
+  if (!all.length) {
+    bList.innerHTML = '<div class="text-slate-500">未检出条码或二维码</div>';
+  } else {
+    for (const item of all) {
+      const row = document.createElement('div');
+      row.className = 'flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-surface-950 border border-surface-800';
+      const left = document.createElement('div');
+      left.className = 'min-w-0 flex-1';
+      left.innerHTML = '<span class="px-1.5 py-0.5 rounded bg-surface-800 text-blue-300 font-mono text-[10px] mr-2">' + escapeHtml(item.kind + ' · ' + item.format) + '</span>' +
+        '<span class="font-mono text-slate-200 break-all">' + escapeHtml(item.data) + '</span>';
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'shrink-0 px-2 py-1 rounded-md bg-surface-800 hover:bg-surface-700 text-slate-300 text-[11px]';
+      btn.textContent = '复制';
+      btn.addEventListener('click', () => copyText(item.data, '已复制条码内容'));
+      row.append(left, btn);
+      bList.appendChild(row);
+    }
+  }
+
+  // OCR lines
+  const oList = $('ocrLinesList');
+  oList.innerHTML = '';
+  const lines = (json.ocr && json.ocr.lines) || [];
+  if (!json.ocr || !json.ocr.ran) {
+    oList.innerHTML = '<div class="text-slate-500">未执行前端 OCR（条码已命中或 OCR 已关闭）</div>';
+  } else if (!lines.length) {
+    oList.innerHTML = '<div class="text-slate-500">OCR 未提取到有效文字行</div>';
+  } else {
+    for (const ln of lines) {
+      const row = document.createElement('div');
+      row.className = 'flex items-center justify-between gap-2 px-3 py-1.5 rounded-lg bg-surface-950 border border-surface-800';
+      const span = document.createElement('span');
+      span.className = 'text-slate-200 break-all flex-1';
+      span.textContent = ln.text;
+      const right = document.createElement('div');
+      right.className = 'flex items-center gap-2 shrink-0';
+      const conf = document.createElement('span');
+      conf.className = 'text-[10px] text-slate-500 font-mono';
+      conf.textContent = Math.round((ln.confidence || 0) * 100) + '%';
+      const pickBtn = document.createElement('button');
+      pickBtn.type = 'button';
+      pickBtn.className = 'px-2 py-0.5 rounded bg-surface-800 hover:bg-blue-600 text-slate-300 hover:text-white text-[10px] transition';
+      pickBtn.textContent = '采用';
+      pickBtn.addEventListener('click', () => {
+        const extracted = extractTrackingFromText(ln.text);
+        const val = extracted ? extracted.value : normalizeToken(ln.text);
+        if (!val) return;
+        const tn = {
+          value: val,
+          company: extracted ? extracted.rule.company : 'manual',
+          company_name: extracted ? extracted.rule.name : '手动选取',
+          method: 'manual_ocr_pick',
+          confidence: ln.confidence || 1,
+          status: 'ok'
+        };
+        json.tracking_number = tn;
+        json.ocr.tracking_number = tn;
+        json.status = 'ok';
+        renderResult(json, true);
+        showToast('已采用为当前单号：' + val);
+      });
+      right.append(conf, pickBtn);
+      row.append(span, right);
+      oList.appendChild(row);
+    }
+  }
+
+  // YOLO
+  if (json.yolo && json.yolo.detections) {
+    $('yoloSection').classList.remove('hidden');
+    const yList = $('yoloList');
+    yList.innerHTML = '';
+    if (!json.yolo.detections.length) {
+      yList.innerHTML = '<span class="text-slate-500">未检出目标框（耗时 ' + json.yolo.latency_ms + 'ms）</span>';
+    } else {
+      for (const d of json.yolo.detections) {
+        const chip = document.createElement('span');
+        chip.className = 'px-2.5 py-1 rounded-lg bg-rose-500/15 border border-rose-500/30 text-rose-300 font-mono';
+        chip.textContent = d.class + ' ' + d.score + ' [' + d.box.join(',') + ']';
+        yList.appendChild(chip);
+      }
+    }
+  } else {
+    $('yoloSection').classList.add('hidden');
+  }
+
+  // LLM
+  if (json.llm && json.llm.invoked) {
+    $('llmSection').classList.remove('hidden');
+    const l = json.llm;
+    const p = l.parsed || {};
+    const fields = [];
+    if (p.recipient) fields.push('收件人：' + escapeHtml(p.recipient));
+    if (p.phone) fields.push('电话：' + escapeHtml(p.phone));
+    if (p.address) fields.push('地址：' + escapeHtml(p.address));
+    if (p.reason) fields.push('依据：' + escapeHtml(p.reason));
+    const tokens = l.usage && l.usage.total_tokens ? (' · tokens=' + l.usage.total_tokens) : '';
+    $('llmDetail').innerHTML =
+      '<div class="flex flex-wrap gap-x-4 gap-y-1">' +
+      '<span>模型：<strong class="text-violet-300">' + escapeHtml(l.model) + '</strong></span>' +
+      '<span>状态：<strong class="' + (l.ok ? 'text-emerald-400' : 'text-rose-400') + '">' + (l.ok ? '成功' : escapeHtml(l.error || '失败')) + '</strong></span>' +
+      '<span>耗时：' + l.latency_ms + 'ms' + tokens + '</span>' +
+      '</div>' +
+      (fields.length ? ('<div class="text-[11px] text-slate-300 leading-relaxed">' + fields.join(' ｜ ') + '</div>') : '');
+  } else {
+    $('llmSection').classList.add('hidden');
+  }
+
+  // Fallback
+  if (json.fallback && json.fallback.invoked) {
+    $('fallbackSection').classList.remove('hidden');
+    const fb = json.fallback;
+    $('fallbackDetail').innerHTML =
+      '<div class="flex flex-wrap gap-x-4 gap-y-1 mb-1.5">' +
+      '<span>状态：<strong class="' + (fb.ok ? 'text-emerald-400' : 'text-rose-400') + '">' + (fb.ok ? 'HTTP ' + fb.status_code : (fb.error || '失败')) + '</strong></span>' +
+      '<span>耗时：' + fb.latency_ms + 'ms</span>' +
+      '</div>' +
+      '<div class="text-[11px] text-slate-400 break-all">Endpoint：' + escapeHtml(fb.endpoint) + '</div>';
+  } else {
+    $('fallbackSection').classList.add('hidden');
+  }
+}
+
+function escapeHtml(str) {
+  return String(str || '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// ---------- 核心处理流程：图片识别主链路 ----------
+async function processImageFile(file, sourceLabel) {
+  lastFile = file;
+  const t0 = performance.now();
+  setStep('stepBarcode', '解码中…', 'running');
+  setStep('stepOcr', ocrEnabled ? '等待中' : '已关闭', 'idle');
+  setStep('stepLlm', isLlmConfigured() ? '已就绪' : '未配置', 'idle');
+  setStep('stepFallback', isFallbackConfigured() ? '已就绪' : '未配置', 'idle');
+  setStatus('正在执行纯前端条码解码…');
+
+  // Step 1: 前端条码识别（支持多轮增强）
+  const { items, pass } = await decodeBarcodesMultiPass(file);
+  const barcodeMs = Math.round(performance.now() - t0);
+  const json = buildBaseJson(items, sourceLabel || 'photo', t0, pass);
+
+  if (json.tracking_number) {
+    setStep('stepBarcode', '命中 · ' + barcodeMs + 'ms', 'ok');
+    setStep('stepOcr', '已跳过', 'idle');
+    if (isFallbackConfigured()) setStep('stepFallback', '已跳过', 'idle');
+  } else {
+    setStep('stepBarcode', items.length ? ('有码非单号 · ' + barcodeMs + 'ms') : ('未检出 · ' + barcodeMs + 'ms'), 'warn');
+  }
+
+  // Step 2: 前端 OCR 兜底（仅条码未命中有效单号，且用户开启了 OCR，且非 on_no_barcode 跳过场景）
+  const fbCfg = appConfig.fallback;
+  const shouldSkipOcrForFallback = isFallbackConfigured() && fbCfg.triggerMode === 'on_no_barcode' && !items.length;
+
+  if (json.status !== 'ok' && ocrEnabled && !shouldSkipOcrForFallback) {
+    const ocrRes = await runOcr(file);
+    if (ocrRes) {
+      json.ocr = ocrRes;
+      if (ocrRes.tracking_number) {
+        json.tracking_number = ocrRes.tracking_number;
+        json.status = 'ok';
+      }
+    }
+  } else if (json.status !== 'ok' && !ocrEnabled) {
+    setStep('stepOcr', '已关闭', 'idle');
+  }
+
+  // Optional YOLO + ROI when toggle is ON
+  let yoloDets = null;
+  if (yoloEnabled) {
+    const yolo = await runYoloAndRoi(file);
+    if (yolo) {
+      json.yolo = yolo;
+      yoloDets = yolo.detections;
+      if (json.status !== 'ok' && yolo.roi_tracking) {
+        json.tracking_number = yolo.roi_tracking;
+        json.ocr.tracking_number = yolo.roi_tracking;
+        json.status = 'ok';
+      }
+    }
+  }
+
+  // Step 3: OpenAI 兼容 LLM 辅助处理（默认关闭）
+  const llmCfg = appConfig.llm;
+  const shouldRunLlm = isLlmConfigured() && (
+    llmCfg.triggerMode === 'always_assist' ||
+    (llmCfg.triggerMode === 'on_no_tracking' && json.status !== 'ok')
+  );
+  if (shouldRunLlm) {
+    const llmRes = await callLlmAssist(file, json);
+    if (llmRes) {
+      json.llm = llmRes;
+      if (json.status !== 'ok' && llmRes.tracking_number) {
+        json.tracking_number = llmRes.tracking_number;
+        json.ocr.tracking_number = llmRes.tracking_number;
+        json.status = 'ok';
+      }
+    }
+  } else if (isLlmConfigured() && json.status === 'ok' && llmCfg.triggerMode === 'on_no_tracking') {
+    setStep('stepLlm', '已跳过', 'idle');
+  }
+
+  // Step 4: 可配置 Fallback API（默认不存在；仅当显式配置开启且满足触发策略时调用）
+  if (json.status !== 'ok' && isFallbackConfigured() && fbCfg.triggerMode !== 'manual_only') {
+    const fbRes = await callFallbackApi(file, json);
+    if (fbRes) {
+      json.fallback = fbRes;
+      if (fbRes.tracking_number) {
+        json.tracking_number = fbRes.tracking_number;
+        json.ocr.tracking_number = fbRes.tracking_number;
+        json.status = 'ok';
+      }
+    }
+  }
+
+  json.latency_ms = Math.round(performance.now() - t0);
+  await renderPreviewCanvas(file, json.barcodes, yoloDets);
+  renderResult(json, true);
+
+  const tn = getEffectiveTracking(json);
+  if (tn) {
+    setStatus('识别成功：' + tn.value + '（' + (tn.company_name || tn.company) + ' · 来源：' + tn.method + ' · 耗时 ' + json.latency_ms + 'ms）');
+  } else if (isFallbackConfigured() && fbCfg.triggerMode === 'manual_only') {
+    setStatus('前端未命中有效快递单号。当前 Fallback API 为手动模式，可点击「调用 Fallback API」继续识别。');
+  } else if (!isFallbackConfigured()) {
+    setStatus('前端未命中有效快递单号（当前未配置 Fallback API；如需后端兜底请在右上角「API 配置」中设置）。');
+  } else {
+    setStatus('前端与已配置的 Fallback API 均未识别出有效快递单号，请确认图片清晰或检查 API 响应格式。');
+  }
+}
+
+// ---------- 实时摄像头扫码 ----------
+const videoEl = $('video');
+const frameCanvas = $('frame');
+const frameCtx = frameCanvas.getContext('2d');
+
+async function startCamera() {
+  stopCamera();
+  if (!engine) {
+    setStatus('当前浏览器无可用条码引擎，请使用「拍照 / 选图」通过前端 OCR 或 Fallback API 识别。');
+    return;
+  }
+  $('videoWrap').classList.remove('hidden');
+  setStatus('正在启动摄像头…（实时扫码需 HTTPS 或 localhost，若受限请使用「拍照 / 选图」）');
+
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode, width: { ideal: 1280 }, height: { ideal: 720 } },
+      audio: false
+    });
+    videoEl.srcObject = stream;
+    await videoEl.play();
+    setStatus('实时扫码中：请将快递条码置于取景框内…');
+    liveTimer = setInterval(scanVideoFrame, 260);
+  } catch (err) {
+    setStatus('无法打开摄像头：' + (err && err.message ? err.message : '权限被拒绝') + ' —— 请使用「拍照 / 选图」。');
+    stopCamera();
+  }
+}
+
+async function scanVideoFrame() {
+  if (!videoEl.videoWidth || !engine) return;
+  const w = Math.min(videoEl.videoWidth, 960);
+  const h = Math.round(videoEl.videoHeight * w / videoEl.videoWidth);
+  frameCanvas.width = w;
+  frameCanvas.height = h;
+  frameCtx.drawImage(videoEl, 0, 0, w, h);
+
+  const t0 = performance.now();
+  const items = await detectOnCanvas(frameCanvas);
+  if (items.length) {
+    const snapshotBlob = await new Promise(res => frameCanvas.toBlob(b => res(b), 'image/jpeg', 0.92));
+    stopCamera();
+    lastFile = snapshotBlob;
+    const json = buildBaseJson(items, 'live', t0, 'live_frame');
+    setStep('stepBarcode', json.tracking_number ? '实时命中' : '扫到非单号条码', json.tracking_number ? 'ok' : 'warn');
+    setStep('stepOcr', '已跳过', 'idle');
+    await renderPreviewCanvas(snapshotBlob, json.barcodes, null);
+    renderResult(json, true);
+    setStatus(json.tracking_number
+      ? ('实时扫码命中：' + json.tracking_number.value)
+      : '实时扫到条码，但未匹配快递单号规则。');
+  }
+}
+
+async function captureCurrentFrame() {
+  if (!videoEl.videoWidth) return;
+  frameCanvas.width = videoEl.videoWidth;
+  frameCanvas.height = videoEl.videoHeight;
+  frameCtx.drawImage(videoEl, 0, 0);
+  const blob = await new Promise(res => frameCanvas.toBlob(b => res(b), 'image/jpeg', 0.92));
+  stopCamera();
+  if (blob) await processImageFile(blob, 'camera_capture');
+}
+
+function stopCamera() {
+  if (liveTimer) { clearInterval(liveTimer); liveTimer = null; }
+  if (zxingControls) { try { zxingControls.stop(); } catch (e) {} zxingControls = null; }
+  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+  videoEl.srcObject = null;
+  $('videoWrap').classList.add('hidden');
+}
+
+// ---------- 内置标准 Code 128B 条码生成器（用于生成真实可扫的测试面单） ----------
+const CODE128_PATTERNS = [
+  '212222','222122','222221','121223','121322','131222','122213','122312','132212','221213',
+  '221312','231212','112232','122132','122231','113222','123122','123221','223211','221132',
+  '221231','213212','223112','312131','311222','321122','321221','312212','322112','322211',
+  '212123','212321','232121','111323','131123','131321','112313','132113','132311','211313',
+  '231113','231311','112133','112331','132131','113123','113321','133121','313121','211331',
+  '231131','213113','213311','213131','311123','311321','331121','312113','312311','332111',
+  '314111','221411','431111','111224','111422','121124','121421','141122','141221','112214',
+  '112412','122114','122411','142112','142211','241211','221114','413111','241112','134111',
+  '111242','121142','121241','114212','124112','124211','411212','421112','421211','212141',
+  '214121','412121','111143','111341','131141','114113','114311','411113','411311','113141',
+  '114131','311141','411131','211412','211214','211232','2331112'
+];
+
+function drawCode128B(ctx, text, x, y, barWidth, barHeight) {
+  const codes = [104]; // Start Code B
+  for (let i = 0; i < text.length; i++) {
+    const v = text.charCodeAt(i) - 32;
+    if (v >= 0 && v <= 95) codes.push(v);
+  }
+  let checksum = codes[0];
+  for (let i = 1; i < codes.length; i++) checksum += codes[i] * i;
+  codes.push(checksum % 103);
+  codes.push(106); // Stop
+
+  let cx = x;
+  ctx.fillStyle = '#000';
+  for (const code of codes) {
+    const pat = CODE128_PATTERNS[code];
+    for (let i = 0; i < pat.length; i++) {
+      const w = Number(pat[i]) * barWidth;
+      if (i % 2 === 0) ctx.fillRect(cx, y, w, barHeight);
+      cx += w;
+    }
+  }
+  return cx - x;
+}
+
+function generateSampleWaybillBlob(withBarcode) {
+  const cv = document.createElement('canvas');
+  cv.width = 1000;
+  cv.height = 1320;
+  const ctx = cv.getContext('2d');
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, cv.width, cv.height);
+
+  // 外框与分隔线
+  ctx.strokeStyle = '#111111';
+  ctx.lineWidth = 4;
+  ctx.strokeRect(36, 36, 928, 1248);
+
+  const tracking = withBarcode ? 'SF123456789012' : 'YT9876543210123';
+  const brand = withBarcode ? '顺丰速运  SF EXPRESS' : '圆通速递  YTO EXPRESS';
+
+  ctx.fillStyle = '#000000';
+  ctx.font = 'bold 56px sans-serif';
+  ctx.fillText(brand, 72, 120);
+
+  ctx.beginPath(); ctx.moveTo(36, 160); ctx.lineTo(964, 160); ctx.stroke();
+
+  if (withBarcode) {
+    drawCode128B(ctx, tracking, 110, 210, 4, 180);
+    ctx.font = 'bold 52px monospace';
+    ctx.fillText(tracking, 260, 455);
+  } else {
+    ctx.fillStyle = '#555555';
+    ctx.font = '32px sans-serif';
+    ctx.fillText('（条码磨损 / 无条码测试样本）', 72, 240);
+    ctx.fillStyle = '#000000';
+    ctx.font = 'bold 92px monospace';
+    ctx.fillText(tracking, 72, 390);
+  }
+
+  ctx.beginPath(); ctx.moveTo(36, 510); ctx.lineTo(964, 510); ctx.stroke();
+
+  ctx.font = 'bold 40px sans-serif';
+  ctx.fillText('收件人：张明  13800138000', 72, 600);
+  ctx.font = '34px sans-serif';
+  ctx.fillText('地址：浙江省杭州市西湖区文三路 100 号', 72, 675);
+  ctx.fillText('运单号：' + tracking, 72, 765);
+  ctx.fillText('寄件人：李华  13900139000', 72, 855);
+  ctx.fillText('物品：电子配件 × 1   重量：0.8kg', 72, 940);
+
+  return new Promise(resolve => cv.toBlob(b => resolve(b), 'image/png'));
+}
+
+// ---------- OCR 基准测试（修复原版未加载脚本 & 空对象崩溃） ----------
+async function runOcrBenchmark() {
+  setStatus('OCR 基准：正在准备合成面单并加载 Tesseract.js…');
+  if (!(await ensureTesseractLoaded())) {
+    setStatus('OCR 基准失败：Tesseract.js 加载失败（请检查网络连接）。');
+    return;
+  }
+  const blob = await generateSampleWaybillBlob(false);
+  const t0 = performance.now();
+  const ok = await loadOcrEngine();
+  const loadMs = Math.round(performance.now() - t0);
+  if (!ok) {
+    setStatus('OCR 基准失败：语言模型加载失败。');
+    return;
+  }
+  setStatus('OCR 基准：正在执行首次预热识别…');
+  const t1 = performance.now();
+  const r1 = await ocrWorker.recognize(blob);
+  const warmMs = Math.round(performance.now() - t1);
+
+  setStatus('OCR 基准：正在执行稳态识别…');
+  const t2 = performance.now();
+  const r2 = await ocrWorker.recognize(blob);
+  const steadyMs = Math.round(performance.now() - t2);
+
+  const text2 = (r2 && r2.data && r2.data.text) || '';
+  const hit = /YT9876543210123/i.test(text2.replace(/\s+/g, ''));
+
+  const bench = {
+    sample: '合成无条码面单 1000x1320 (YT9876543210123)',
+    engine: 'tesseract.js@5',
+    load_ms: loadMs,
+    recognize_warm_ms: warmMs,
+    recognize_steady_ms: steadyMs,
+    found_sample_tracking: hit
+  };
+
+  if (!lastJson) {
+    lastJson = buildBaseJson([], 'benchmark', t0, 'benchmark');
+  }
+  lastJson.bench = bench;
+  renderResult(lastJson, false);
+  setStatus('OCR 基准完成：加载 ' + loadMs + 'ms · 首次 ' + warmMs + 'ms · 稳态 ' + steadyMs + 'ms · 命中样本单号=' + (hit ? '是' : '否'));
+}
+
+// ---------- 复制与导出 ----------
+async function copyText(text, successMsg) {
+  try {
+    await navigator.clipboard.writeText(text);
+    showToast(successMsg || '已复制到剪贴板');
+  } catch (e) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    try {
+      document.execCommand('copy');
+      showToast(successMsg || '已复制到剪贴板');
+    } catch (err) {
+      showToast('复制受限，请手动选择复制');
+    }
+    document.body.removeChild(ta);
+  }
+}
+
+function downloadFile(filename, content, mimeType) {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// ---------- 历史记录与规则页渲染 ----------
+function renderHistoryTab() {
+  $('historyCount').textContent = String(scanHistory.length);
+  const q = ($('historySearch').value || '').trim().toUpperCase();
+  const list = $('historyList');
+  list.innerHTML = '';
+
+  const filtered = scanHistory.filter(item =>
+    !q || (item.tracking && item.tracking.toUpperCase().includes(q)) || (item.company && item.company.toUpperCase().includes(q))
+  );
+
+  if (!filtered.length) {
+    list.innerHTML = '<div class="text-slate-500 text-center py-6">暂无匹配的历史记录</div>';
+    return;
+  }
+
+  for (const item of filtered) {
+    const row = document.createElement('div');
+    row.className = 'flex items-center justify-between gap-2 p-2.5 rounded-xl bg-surface-950 border border-surface-800 hover:border-surface-600 transition cursor-pointer';
+    row.innerHTML =
+      '<div class="min-w-0 flex-1">' +
+        '<div class="font-mono font-semibold ' + (item.tracking ? 'text-emerald-400' : 'text-amber-400') + ' truncate">' + escapeHtml(item.tracking || '未匹配快递单号') + '</div>' +
+        '<div class="text-[11px] text-slate-400 mt-0.5">' + escapeHtml(item.company) + ' · ' + escapeHtml(item.method) + ' · ' + escapeHtml(item.time) + '</div>' +
+      '</div>';
+    const copyBtn = document.createElement('button');
+    copyBtn.type = 'button';
+    copyBtn.className = 'shrink-0 px-2.5 py-1 rounded-lg bg-surface-800 hover:bg-surface-700 text-slate-200 text-[11px]';
+    copyBtn.textContent = '复制';
+    copyBtn.addEventListener('click', ev => {
+      ev.stopPropagation();
+      copyText(item.tracking || JSON.stringify(item.json), '已复制');
+    });
+    row.addEventListener('click', () => {
+      renderResult(item.json, false);
+      switchTab('overview');
+    });
+    row.appendChild(copyBtn);
+    list.appendChild(row);
+  }
+}
+
+function renderRulesTab() {
+  const container = $('rulesTable');
+  container.innerHTML = '';
+  for (const r of RULES) {
+    const row = document.createElement('div');
+    row.className = 'flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-surface-950 border border-surface-800';
+    row.innerHTML =
+      '<div><span class="font-medium text-slate-200">' + escapeHtml(r.name) + '</span> <span class="text-[11px] text-slate-500 ml-1">' + escapeHtml(r.desc) + '</span></div>' +
+      '<code class="text-[10px] text-blue-300 font-mono shrink-0">' + escapeHtml(r.re.toString()) + '</code>';
+    container.appendChild(row);
+  }
+}
+
+function switchTab(tabName) {
+  activeTab = tabName;
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    const active = btn.dataset.tab === tabName;
+    btn.className = 'tab-btn px-3 py-2 text-xs font-medium rounded-t-lg border-b-2 transition ' +
+      (active ? 'border-blue-500 text-blue-400 bg-surface-900' : 'border-transparent text-slate-400 hover:text-slate-200');
+  });
+  document.querySelectorAll('.tab-panel').forEach(panel => {
+    panel.classList.toggle('hidden', panel.id !== 'panel-' + tabName);
+  });
+}
+
+// ---------- 配置弹窗逻辑 ----------
+function switchConfigTab(tabName) {
+  document.querySelectorAll('.cfg-tab-btn').forEach(btn => {
+    const active = btn.dataset.cfgtab === tabName;
+    const accent = tabName === 'llm' ? 'border-violet-500 text-violet-300' : 'border-blue-500 text-blue-300';
+    btn.className = 'cfg-tab-btn px-3 py-2 font-medium rounded-t-lg border-b-2 transition ' +
+      (active ? accent + ' bg-surface-900' : 'border-transparent text-slate-400 hover:text-slate-200');
+  });
+  document.querySelectorAll('.cfg-panel').forEach(panel => {
+    panel.classList.toggle('hidden', panel.id !== 'cfgPanel-' + tabName);
+  });
+}
+
+function openSettingsModal() {
+  const fb = appConfig.fallback;
+  const llm = appConfig.llm || DEFAULT_CONFIG.llm;
+  const md = appConfig.models;
+  $('cfgLlmEnabled').checked = Boolean(llm.enabled);
+  $('cfgLlmBaseUrl').value = llm.baseUrl || '';
+  $('cfgLlmModel').value = llm.model || '';
+  $('cfgLlmApiKey').value = llm.apiKey || '';
+  $('cfgLlmTimeout').value = llm.timeoutMs || 25000;
+  $('cfgLlmMode').value = llm.mode || 'vision_and_text';
+  $('cfgLlmTriggerMode').value = llm.triggerMode || 'on_no_tracking';
+  $('cfgLlmPrompt').value = llm.systemPrompt || '';
+  $('cfgEnabled').checked = Boolean(fb.enabled);
+  $('cfgEndpoint').value = fb.endpoint || '';
+  $('cfgMethod').value = fb.method || 'POST';
+  $('cfgTriggerMode').value = fb.triggerMode || 'on_no_tracking';
+  $('cfgPayloadFormat').value = fb.payloadFormat || 'multipart';
+  $('cfgFileField').value = fb.fileFieldName || 'file';
+  $('cfgTimeout').value = fb.timeoutMs || 15000;
+  $('cfgIncludeCtx').checked = Boolean(fb.includeFrontendContext);
+  $('cfgAuthType').value = fb.authType || 'none';
+  $('cfgAuthHeader').value = fb.authHeaderName || 'X-API-Key';
+  $('cfgAuthToken').value = fb.authToken || '';
+  $('cfgRespTrackPath').value = fb.responseTrackingPath || '';
+  $('cfgCustomHeaders').value = fb.customHeaders || '';
+  $('cfgOcrLangPath').value = md.ocrLangPath || './models/';
+  $('cfgYoloModelUrl').value = md.yoloModelUrl || './models/yolov8n.onnx';
+  $('cfgTestResult').classList.add('hidden');
+  $('settingsModal').classList.remove('hidden');
+}
+
+function readConfigFromModal() {
+  return {
+    fallback: {
+      enabled: $('cfgEnabled').checked,
+      endpoint: $('cfgEndpoint').value.trim(),
+      method: $('cfgMethod').value,
+      triggerMode: $('cfgTriggerMode').value,
+      payloadFormat: $('cfgPayloadFormat').value,
+      fileFieldName: $('cfgFileField').value.trim() || 'file',
+      includeFrontendContext: $('cfgIncludeCtx').checked,
+      authType: $('cfgAuthType').value,
+      authHeaderName: $('cfgAuthHeader').value.trim() || 'X-API-Key',
+      authToken: $('cfgAuthToken').value,
+      customHeaders: $('cfgCustomHeaders').value.trim(),
+      timeoutMs: Math.max(1000, Number($('cfgTimeout').value) || 15000),
+      responseTrackingPath: $('cfgRespTrackPath').value.trim()
+    },
+    llm: {
+      enabled: $('cfgLlmEnabled').checked,
+      baseUrl: $('cfgLlmBaseUrl').value.trim(),
+      model: $('cfgLlmModel').value.trim(),
+      apiKey: $('cfgLlmApiKey').value.trim(),
+      timeoutMs: Math.max(2000, Number($('cfgLlmTimeout').value) || 25000),
+      mode: $('cfgLlmMode').value,
+      triggerMode: $('cfgLlmTriggerMode').value,
+      systemPrompt: $('cfgLlmPrompt').value.trim()
+    },
+    models: {
+      ocrLang: 'chi_sim',
+      ocrLangPath: $('cfgOcrLangPath').value.trim() || './models/',
+      yoloModelUrl: $('cfgYoloModelUrl').value.trim() || './models/yolov8n.onnx'
     }
   };
-  img.src = URL.createObjectURL(blob);
 }
 
-// ---------- OCR 基准（手机实测：合成面单样本 → chi_sim 计时） ----------
-function makeSampleBlob() {
-  const cv = document.createElement('canvas');
-  cv.width = 1240; cv.height = 1754;
-  const ctx = cv.getContext('2d');
-  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cv.width, cv.height);
-  ctx.fillStyle = '#000';
-  ctx.font = 'bold 90px sans-serif'; ctx.fillText('顺丰速运 SF EXPRESS', 60, 160);
-  ctx.font = 'bold 170px sans-serif'; ctx.fillText('SF123456789012', 60, 420);
-  ctx.font = '56px sans-serif';
-  ctx.fillText('收件人：张三 13800138000', 60, 600);
-  ctx.fillText('地址：浙江省杭州市西湖区文三路 1 号', 60, 700);
-  ctx.fillText('快递单号 SF123456789012', 60, 820);
-  for (let x = 0; x < 900; x += 6) ctx.fillRect(60 + x, 880, 3, 40);
-  return new Promise(r => cv.toBlob(b => r(b), 'image/png'));
-}
-async function benchOcr() {
-  status('基准：绘制样本图并加载 OCR 引擎…（首次含 20MB 中文模型下载）');
-  const blob = await makeSampleBlob();
-  const t0 = performance.now();
-  const w = await Tesseract.createWorker(OCR_LANG, 1, { langPath: OCR_LANG_PATH });
-  const loadMs = performance.now() - t0;
-  const t1 = performance.now(); const r1 = await w.recognize(blob); const warmMs = performance.now() - t1;
-  const t2 = performance.now(); const r2 = await w.recognize(blob); const steadyMs = performance.now() - t2;
-  await w.terminate();
-  return { sample: '合成面单 1240x1754', engine: 'tesseract.js@5 chi_sim', load_ms: Math.round(loadMs),
-           recognize_warm_ms: Math.round(warmMs), recognize_steady_ms: Math.round(steadyMs),
-           found_sf: /SF123456789012/.test((r2.data && r2.data.text) || '') };
-}
+// ---------- 事件绑定 ----------
+$('btnCamera').addEventListener('click', startCamera);
+$('btnStop').addEventListener('click', stopCamera);
+$('btnSwitchCam').addEventListener('click', () => {
+  facingMode = facingMode === 'environment' ? 'user' : 'environment';
+  startCamera();
+});
+$('btnCaptureFrame').addEventListener('click', captureCurrentFrame);
 
-// ---------- UI 粘合 ----------
-const $ = id => document.getElementById(id);
-function status(msg) { $('status').textContent = msg; }
-function toast(msg) {
-  const t = $('toast'); t.textContent = msg; t.classList.add('show');
-  setTimeout(() => t.classList.remove('show'), 1600);
-}
-async function copyJson() {
-  if (!lastJson) return;
-  try { await navigator.clipboard.writeText(JSON.stringify(lastJson, null, 2)); toast('已复制'); }
-  catch (e) { prompt('浏览器不允许自动复制，请手动复制：', JSON.stringify(lastJson, null, 2)); }
-}
-$('btnCamera').addEventListener('click', startLive);
-$('btnStop').addEventListener('click', stopLive);
-$('fileInput').addEventListener('change', e => { if (e.target.files && e.target.files[0]) onFile(e.target.files[0]); e.target.value = ''; });
-$('btnCopy').addEventListener('click', copyJson);
-$('btnOcr').addEventListener('click', () => {
+$('fileInput').addEventListener('change', e => {
+  if (e.target.files && e.target.files[0]) processImageFile(e.target.files[0], 'photo');
+  e.target.value = '';
+});
+
+// 二级测试面板展开/收起
+$('btnToggleTestTools').addEventListener('click', () => {
+  const panel = $('testToolsPanel');
+  const hidden = panel.classList.toggle('hidden');
+  $('btnToggleTestTools').textContent = hidden ? '测试工具 ▾' : '测试工具 ▴';
+});
+
+// 拖拽 & 粘贴上传
+const dropZone = $('dropZone');
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drop-active'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drop-active'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('drop-active');
+  const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+  if (f && f.type.startsWith('image/')) processImageFile(f, 'drop');
+});
+window.addEventListener('paste', e => {
+  const items = e.clipboardData && e.clipboardData.items;
+  if (!items) return;
+  for (const it of items) {
+    if (it.type && it.type.startsWith('image/')) {
+      const f = it.getAsFile();
+      if (f) { processImageFile(f, 'paste'); break; }
+    }
+  }
+});
+
+// 测试面单按钮
+$('btnSampleBarcode').addEventListener('click', async () => {
+  const blob = await generateSampleWaybillBlob(true);
+  await processImageFile(blob, 'sample_barcode');
+});
+$('btnSampleTextOnly').addEventListener('click', async () => {
+  const blob = await generateSampleWaybillBlob(false);
+  await processImageFile(blob, 'sample_text_only');
+});
+
+// 前端功能开关
+$('btnToggleEnhance').addEventListener('click', () => {
+  enhanceEnabled = !enhanceEnabled;
+  const btn = $('btnToggleEnhance');
+  btn.textContent = '图像增强：' + (enhanceEnabled ? '开' : '关');
+  btn.className = 'px-2.5 py-1.5 rounded-lg text-xs font-medium border transition ' +
+    (enhanceEnabled ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30' : 'bg-surface-800 text-slate-400 border-surface-700');
+});
+
+$('btnToggleOcr').addEventListener('click', () => {
   ocrEnabled = !ocrEnabled;
-  $('btnOcr').textContent = '🔤 OCR 兜底：' + (ocrEnabled ? '开' : '关');
-  $('btnOcr').classList.toggle('off', !ocrEnabled);
-  status('OCR 兜底已' + (ocrEnabled ? '开启' : '关闭') + '：条码未命中时' + (ocrEnabled ? '自动尝试 OCR 提取单号' : '不触发 OCR'));
-});
-$('btnYolo').addEventListener('click', async () => {
-  if (!lastFile) { status('先拍/选一张图片，再点 YOLO 检测'); return; }
-  const yolo = await runYolo(lastFile);
-  if (yolo) {
-    if (!lastJson) lastJson = {};
-    lastJson.yolo = yolo;
-    drawYolo(lastFile, yolo.detections, yolo.imgW, yolo.imgH);
-    render(lastJson);
-    status('YOLO：检出 ' + yolo.detections.length + ' 个目标（' + yolo.ep + ' · ' + yolo.latency_ms + 'ms）——预训练 COCO 权重为管线验证，单号区域检测需微调后换权重');
-  }
-});
-$('btnBench').addEventListener('click', async () => {
-  const bench = await benchOcr();
-  if (!bench) { status('基准失败'); return; }
-  if (!lastJson) lastJson = {};
-  lastJson.bench = bench;
-  render(lastJson);
-  status('基准完成：模型加载 ' + bench.load_ms + 'ms · 首次识别 ' + bench.recognize_warm_ms + 'ms · 稳态识别 ' + bench.recognize_steady_ms + 'ms · 识别到单号=' + bench.found_sf + ' —— 手机实测请在同一页面跑并报数');
+  const btn = $('btnToggleOcr');
+  btn.textContent = '前端 OCR：' + (ocrEnabled ? '开' : '关');
+  btn.className = 'px-2.5 py-1.5 rounded-lg text-xs font-medium border transition ' +
+    (ocrEnabled ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30' : 'bg-surface-800 text-slate-400 border-surface-700');
+  setStep('stepOcr', ocrEnabled ? '待机' : '已关闭', 'idle');
 });
 
-window.addEventListener('DOMContentLoaded', async () => {
-  try {
-    await initEngine();
-    $('engine').textContent = '引擎：' + (engine.kind === 'native' ? '原生 BarcodeDetector（' + engine.detector.formats.length + ' 格式）' : 'ZXing-js（CDN 兜底）');
-  } catch (e) {
-    $('engine').textContent = '引擎初始化失败：' + e.message;
-    $('status').textContent = '无法扫码；请换新版 Chrome / Safari，或转路线 B（后端 API）';
+$('btnYolo').addEventListener('click', async () => {
+  yoloEnabled = !yoloEnabled;
+  const btn = $('btnYolo');
+  btn.textContent = 'YOLO + ROI：' + (yoloEnabled ? '开' : '关');
+  btn.className = 'px-2 py-1.5 rounded-lg text-xs font-medium border transition ' +
+    (yoloEnabled ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30' : 'bg-surface-800 hover:bg-surface-700 text-slate-400 border-surface-700');
+  if (!yoloEnabled) {
+    setStatus('YOLO + ROI 已关闭');
+    return;
   }
+  if (!lastFile) {
+    setStatus('YOLO + ROI 已开启：上传图片后将自动执行区域检测与 ROI 二次识别');
+    return;
+  }
+  const yolo = await runYoloAndRoi(lastFile);
+  if (!yolo) return;
+  if (!lastJson) lastJson = buildBaseJson([], 'yolo', performance.now(), 'yolo');
+  lastJson.yolo = yolo;
+  if (!getEffectiveTracking(lastJson) && yolo.roi_tracking) {
+    lastJson.tracking_number = yolo.roi_tracking;
+    lastJson.ocr.tracking_number = yolo.roi_tracking;
+    jsonStatusSync(lastJson);
+  }
+  await renderPreviewCanvas(lastFile, lastJson.barcodes, yolo.detections);
+  renderResult(lastJson, Boolean(yolo.roi_tracking));
+  setStatus('YOLO 检测完成：检出 ' + yolo.detections.length + ' 个区域（' + yolo.ep + ' · ' + yolo.latency_ms + 'ms）' +
+    (yolo.roi_tracking ? '，ROI 二次识别命中单号：' + yolo.roi_tracking.value : ''));
+});
+
+function jsonStatusSync(j) {
+  if (getEffectiveTracking(j)) j.status = 'ok';
+}
+
+$('btnManualLlm').addEventListener('click', async () => {
+  if (!isLlmConfigured()) { openSettingsModal(); switchConfigTab('llm'); return; }
+  if (!lastFile && !lastJson) { showToast('请先选择或拍摄一张面单图片'); return; }
+  if (!lastJson) lastJson = buildBaseJson([], 'manual_llm', performance.now(), 'manual');
+  const llmRes = await callLlmAssist(lastFile, lastJson);
+  if (llmRes) {
+    lastJson.llm = llmRes;
+    if (llmRes.tracking_number) {
+      lastJson.tracking_number = llmRes.tracking_number;
+      lastJson.ocr.tracking_number = llmRes.tracking_number;
+      lastJson.status = 'ok';
+    }
+    renderResult(lastJson, Boolean(llmRes.tracking_number));
+    setStatus(llmRes.tracking_number
+      ? ('LLM 辅助命中：' + llmRes.tracking_number.value + '（' + llmRes.latency_ms + 'ms）')
+      : (llmRes.ok ? 'LLM 辅助解析完成（未提取到有效单号）' : ('LLM 请求失败：' + llmRes.error)));
+  }
+});
+
+$('btnBench').addEventListener('click', runOcrBenchmark);
+
+$('btnManualFallback').addEventListener('click', async () => {
+  if (!isFallbackConfigured()) { openSettingsModal(); return; }
+  if (!lastFile) { showToast('请先选择或拍摄一张面单图片'); return; }
+  if (!lastJson) lastJson = buildBaseJson([], 'manual_fallback', performance.now(), 'manual');
+  const fbRes = await callFallbackApi(lastFile, lastJson);
+  if (fbRes) {
+    lastJson.fallback = fbRes;
+    if (fbRes.tracking_number) {
+      lastJson.tracking_number = fbRes.tracking_number;
+      lastJson.ocr.tracking_number = fbRes.tracking_number;
+      lastJson.status = 'ok';
+    }
+    renderResult(lastJson, Boolean(fbRes.tracking_number));
+    setStatus(fbRes.tracking_number
+      ? ('Fallback API 命中：' + fbRes.tracking_number.value + '（' + fbRes.latency_ms + 'ms）')
+      : ('Fallback API 返回：' + (fbRes.error || '未识别出单号')));
+  }
+});
+
+// 结果操作按钮
+$('btnCopyTracking').addEventListener('click', () => {
+  const tn = getEffectiveTracking(lastJson);
+  if (tn) copyText(tn.value, '已复制单号：' + tn.value);
+});
+$('btnCopyJson').addEventListener('click', () => {
+  if (lastJson) copyText(JSON.stringify(lastJson, null, 2), '已复制 JSON');
+});
+$('btnDownloadJson').addEventListener('click', () => {
+  if (!lastJson) return;
+  const tn = getEffectiveTracking(lastJson);
+  const name = 'express-scan-' + (tn ? tn.value : lastJson.request_id.slice(0, 8)) + '.json';
+  downloadFile(name, JSON.stringify(lastJson, null, 2), 'application/json');
+});
+document.querySelectorAll('.cfg-tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => switchConfigTab(btn.dataset.cfgtab));
+});
+
+$('btnTestLlm').addEventListener('click', async () => {
+  const draft = readConfigFromModal();
+  const out = $('cfgTestResult');
+  out.classList.remove('hidden');
+  if (!draft.llm.baseUrl || !draft.llm.model) {
+    out.className = 'rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 p-3 font-mono text-[11px]';
+    out.textContent = '请先填写 Base URL 和 Model 名称。';
+    return;
+  }
+  out.className = 'rounded-xl bg-surface-950 border border-surface-700 text-slate-300 p-3 font-mono text-[11px]';
+  out.textContent = '正在测试 OpenAI 兼容接口：' + resolveChatCompletionsUrl(draft.llm.baseUrl) + ' …';
+  const testCfg = { ...draft.llm, enabled: true, mode: 'text_only' };
+  const res = await callLlmAssist(null, { barcodes: { '1d': [], '2d': [] }, ocr: { full_text: '运单号：SF123456789012 收件人：张三' } }, testCfg);
+  updateFallbackIndicators();
+  if (res && res.ok) {
+    out.className = 'rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 p-3 font-mono text-[11px] whitespace-pre-wrap break-all';
+    out.textContent = 'LLM 连接成功 · ' + res.latency_ms + 'ms\n模型：' + res.model + '\n解析单号：' +
+      (res.tracking_number ? res.tracking_number.value + ' (' + res.tracking_number.company_name + ')' : '未解析') +
+      '\n响应：' + JSON.stringify(res.parsed).slice(0, 320);
+  } else {
+    out.className = 'rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 p-3 font-mono text-[11px] whitespace-pre-wrap break-all';
+    out.textContent = 'LLM 请求失败：' + (res ? res.error : '未知错误') + '\n请检查 Base URL、API Key、Model 名称及接口跨域（CORS）配置。';
+  }
+});
+
+$('btnClearResult').addEventListener('click', () => {
+  lastJson = null;
+  lastFile = null;
+  $('trackingDisplay').textContent = '—';
+  $('trackingDisplay').className = 'text-2xl sm:text-3xl font-bold font-mono tracking-tight text-slate-400';
+  $('resultCompanyBadge').classList.add('hidden');
+  $('resultMethodBadge').classList.add('hidden');
+  $('btnCopyTracking').classList.add('hidden');
+  $('btnCopyJson').disabled = true;
+  $('btnDownloadJson').disabled = true;
+  $('btnManualFallback').disabled = true;
+  $('metaLine').textContent = '等待识别输入…';
+  $('jsonOut').textContent = '（扫码后在这里显示完整 JSON）';
+  $('overviewEmpty').classList.remove('hidden');
+  $('overviewContent').classList.add('hidden');
+  $('previewCard').classList.add('hidden');
+  setStep('stepBarcode', '待机', 'idle');
+  setStep('stepOcr', ocrEnabled ? '待机' : '已关闭', 'idle');
+  updateFallbackIndicators();
+  setStatus('已清空当前识别结果。');
+});
+
+// Tabs
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+});
+
+// 历史记录搜索与导出
+$('historySearch').addEventListener('input', renderHistoryTab);
+$('btnExportCsv').addEventListener('click', () => {
+  if (!scanHistory.length) { showToast('暂无历史记录可导出'); return; }
+  const rows = [['时间', '快递单号', '快递公司', '识别方式', '耗时(ms)']];
+  for (const h of scanHistory) {
+    rows.push([h.time, h.tracking, h.company, h.method, String(h.latency_ms)]);
+  }
+  const csv = '\uFEFF' + rows.map(r => r.map(v => '"' + String(v || '').replace(/"/g, '""') + '"').join(',')).join('\n');
+  downloadFile('express-scan-history.csv', csv, 'text/csv;charset=utf-8');
+});
+$('btnClearHistory').addEventListener('click', () => {
+  scanHistory = [];
+  saveHistory();
+  renderHistoryTab();
+  showToast('历史记录已清空');
+});
+
+// 规则测试
+$('btnRuleTest').addEventListener('click', () => {
+  const input = $('ruleTestInput').value;
+  const out = $('ruleTestOutput');
+  out.classList.remove('hidden');
+  const m = extractTrackingFromText(input);
+  if (m) {
+    out.className = 'rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 px-3 py-2 text-xs';
+    out.textContent = '匹配成功：' + m.value + '（' + m.rule.name + ' · ' + m.rule.company + '）';
+  } else {
+    out.className = 'rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 px-3 py-2 text-xs';
+    out.textContent = '未匹配任何快递单号规则（已自动过滤 11 位手机号）';
+  }
+});
+
+// 配置弹窗事件
+$('btnOpenSettings').addEventListener('click', openSettingsModal);
+$('btnFallbackBadge').addEventListener('click', openSettingsModal);
+$('btnCloseSettings').addEventListener('click', () => $('settingsModal').classList.add('hidden'));
+$('settingsModal').addEventListener('click', e => {
+  if (e.target === $('settingsModal')) $('settingsModal').classList.add('hidden');
+});
+
+$('btnSaveConfig').addEventListener('click', () => {
+  const next = readConfigFromModal();
+  if (next.llm.enabled && (!next.llm.baseUrl || !next.llm.model)) {
+    showToast('开启 LLM 辅助时请填写 Base URL 和 Model 名称');
+    switchConfigTab('llm');
+    return;
+  }
+  if (next.fallback.enabled && !next.fallback.endpoint) {
+    showToast('开启 Fallback 时请填写有效的 API Endpoint URL');
+    switchConfigTab('fallback');
+    return;
+  }
+  if (next.fallback.customHeaders) {
+    try { JSON.parse(next.fallback.customHeaders); }
+    catch (e) { showToast('额外请求头不是合法 JSON'); return; }
+  }
+  saveConfig(next);
+  $('settingsModal').classList.add('hidden');
+  showToast((isLlmConfigured() || isFallbackConfigured()) ? 'API 配置已保存' : '配置已保存（纯前端模式）');
+});
+
+$('btnResetConfig').addEventListener('click', () => {
+  saveConfig(cloneDefaultConfig());
+  openSettingsModal();
+  showToast('已重置为默认配置（无 Fallback）');
+});
+
+$('btnTestApi').addEventListener('click', async () => {
+  const draft = readConfigFromModal();
+  const out = $('cfgTestResult');
+  out.classList.remove('hidden');
+  if (!draft.fallback.endpoint) {
+    out.className = 'rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 p-3 font-mono text-[11px]';
+    out.textContent = '未填写 API Endpoint URL：默认不存在 Fallback API，无需测试。';
+    return;
+  }
+  const prev = appConfig;
+  appConfig = { ...draft, fallback: { ...draft.fallback, enabled: true } };
+  out.className = 'rounded-xl bg-surface-950 border border-surface-700 text-slate-300 p-3 font-mono text-[11px]';
+  out.textContent = '正在发送合成测试面单至 ' + draft.fallback.endpoint + ' …';
+  const blob = await generateSampleWaybillBlob(true);
+  const res = await callFallbackApi(blob, { barcodes: { '1d': [], '2d': [] }, ocr: null });
+  appConfig = prev;
+  updateFallbackIndicators();
+  if (res && res.ok) {
+    out.className = 'rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 p-3 font-mono text-[11px] whitespace-pre-wrap break-all';
+    out.textContent = '连接成功 · HTTP ' + res.status_code + ' · ' + res.latency_ms + 'ms\n解析单号：' +
+      (res.tracking_number ? res.tracking_number.value + ' (' + res.tracking_number.company_name + ')' : '未解析到单号，可配置「单号响应字段路径」') +
+      '\n响应预览：' + JSON.stringify(res.raw_response).slice(0, 320);
+  } else {
+    out.className = 'rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 p-3 font-mono text-[11px] whitespace-pre-wrap break-all';
+    out.textContent = '请求失败：' + (res ? res.error : '未知错误') + '\n请检查接口地址、HTTPS/CORS 跨域配置或鉴权信息。';
+  }
+});
+
+// ---------- 初始化 ----------
+window.addEventListener('DOMContentLoaded', async () => {
+  renderRulesTab();
+  renderHistoryTab();
+  updateFallbackIndicators();
+  await initBarcodeEngine();
 });
 </script>
 </body>
